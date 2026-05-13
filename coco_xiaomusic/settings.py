@@ -5,6 +5,8 @@ from pathlib import Path
 
 SETTINGS_PATH = Path("data/app_settings.json")
 REPAIRABLE_TEXT_FIELDS = ("search_tts", "found_tts", "error_tts")
+LEGACY_KEYWORDS = ("coco", "COCO", "Coco", "CoCo", "可可")
+DEFAULT_KEYWORDS = ("点歌", "点一首", "搜歌", "可可", "coco", "COCO", "Coco", "CoCo")
 
 
 def repair_text(value: str) -> str:
@@ -35,7 +37,7 @@ class AppSettings:
     found_tts: str = "搜到啦，马上为你播放{artist}的{title}"
     error_tts: str = "coco暂时没有拿到可播放的第一条结果"
     edge_tts_voice: str = "zh-CN-XiaoyiNeural"
-    coco_keywords: tuple[str, ...] = ("coco", "COCO", "Coco", "CoCo", "可可")
+    coco_keywords: tuple[str, ...] = DEFAULT_KEYWORDS
     device_aliases: dict[str, str] = None
 
     @classmethod
@@ -53,6 +55,9 @@ class AppSettings:
         keywords = data.get("coco_keywords")
         if isinstance(keywords, list):
             data["coco_keywords"] = tuple(keywords)
+        if tuple(data.get("coco_keywords", ())) == LEGACY_KEYWORDS:
+            data["coco_keywords"] = DEFAULT_KEYWORDS
+            repaired = True
         for key in ("selected_dids", "manual_target_dids"):
             if isinstance(data.get(key), list):
                 data[key] = tuple(data[key])
