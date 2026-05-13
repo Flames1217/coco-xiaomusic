@@ -4,6 +4,19 @@ from pathlib import Path
 
 
 SETTINGS_PATH = Path("data/app_settings.json")
+REPAIRABLE_TEXT_FIELDS = ("search_tts", "found_tts", "error_tts")
+
+
+def _repair_mojibake(value: str) -> str:
+    if not isinstance(value, str):
+        return value
+    if not any(marker in value for marker in ("å", "æ", "ç", "ï", "ä", "", "")):
+        return value
+    try:
+        repaired = value.encode("latin1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    return repaired if repaired != value else value
 
 
 @dataclass
@@ -30,6 +43,13 @@ class AppSettings:
         if not SETTINGS_PATH.exists():
             return cls()
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        repaired = False
+        for field_name in REPAIRABLE_TEXT_FIELDS:
+            current = data.get(field_name)
+            fixed = _repair_mojibake(current)
+            if fixed != current:
+                data[field_name] = fixed
+                repaired = True
         keywords = data.get("coco_keywords")
         if isinstance(keywords, list):
             data["coco_keywords"] = tuple(keywords)
@@ -41,7 +61,10 @@ class AppSettings:
             data["selected_dids"] = (legacy_did,)
         if legacy_did and not data.get("manual_target_dids"):
             data["manual_target_dids"] = (legacy_did,)
-        return cls(**data)
+        loaded = cls(**data)
+        if repaired:
+            loaded.save()
+        return loaded
 
     def save(self):
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

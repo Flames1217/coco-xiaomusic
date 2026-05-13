@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -61,7 +62,11 @@ class CocoXiaoMusicService:
             "info": ("bold cyan", "🎧"),
         }
         style, icon = styles[level]
-        console.print(f"[{style}]{icon} {message}[/{style}]")
+        if getattr(sys.stdout, "isatty", lambda: False)():
+            try:
+                console.print(f"[{style}]{icon} {message}[/{style}]")
+            except UnicodeEncodeError:
+                console.print(f"[{style}]{level.upper()}: {message}[/{style}]")
 
     def _patch_online_play(self):
         async def coco_online_play(service, did="", arg1="", **kwargs):
