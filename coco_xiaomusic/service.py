@@ -13,7 +13,7 @@ from xiaomusic.config import Config
 from xiaomusic.xiaomusic import XiaoMusic
 
 from .coco_client import CocoClient, CocoSong
-from .settings import AppSettings
+from .settings import AppSettings, repair_text
 
 
 console = Console()
@@ -169,7 +169,7 @@ class CocoXiaoMusicService:
                 {
                     "did": did,
                     "device_id": str(item.get("deviceID", "") or ""),
-                    "raw_name": str(item.get("alias") or item.get("name") or "未知设备"),
+                    "raw_name": repair_text(str(item.get("alias") or item.get("name") or "未知设备")),
                     "hardware": str(item.get("hardware", "") or ""),
                 }
             )
@@ -424,14 +424,16 @@ class CocoXiaoMusicService:
             for device in self.xiaomusic.device_manager.devices.values():
                 raw_device = getattr(device, "device", None)
                 did = getattr(device, "did", "") or getattr(raw_device, "did", "")
-                raw_name = getattr(raw_device, "name", "") or getattr(device, "group_name", "")
+                raw_name = repair_text(
+                    getattr(raw_device, "name", "") or getattr(device, "group_name", "")
+                )
                 devices.append(
                     {
                         "did": did,
                         "device_id": getattr(device, "device_id", "") or getattr(raw_device, "device_id", ""),
-                        "name": self.settings.device_aliases.get(did) or raw_name,
+                        "name": repair_text(self.settings.device_aliases.get(did) or raw_name),
                         "raw_name": raw_name,
-                        "alias": self.settings.device_aliases.get(did, ""),
+                        "alias": repair_text(self.settings.device_aliases.get(did, "")),
                         "hardware": getattr(device, "hardware", "") or getattr(raw_device, "hardware", ""),
                     }
                 )
@@ -442,9 +444,9 @@ class CocoXiaoMusicService:
                     {
                         "did": did,
                         "device_id": item["device_id"],
-                        "name": self.settings.device_aliases.get(did) or item["raw_name"],
-                        "raw_name": item["raw_name"],
-                        "alias": self.settings.device_aliases.get(did, ""),
+                        "name": repair_text(self.settings.device_aliases.get(did) or item["raw_name"]),
+                        "raw_name": repair_text(item["raw_name"]),
+                        "alias": repair_text(self.settings.device_aliases.get(did, "")),
                         "hardware": item["hardware"],
                     }
                 )
@@ -473,7 +475,7 @@ class CocoXiaoMusicService:
             {
                 "at": item.at,
                 "level": item.level,
-                "message": item.message,
+                "message": repair_text(item.message),
                 "keyword": item.keyword,
                 "song": item.song,
             }

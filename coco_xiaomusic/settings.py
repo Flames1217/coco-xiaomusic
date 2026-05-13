@@ -7,7 +7,7 @@ SETTINGS_PATH = Path("data/app_settings.json")
 REPAIRABLE_TEXT_FIELDS = ("search_tts", "found_tts", "error_tts")
 
 
-def _repair_mojibake(value: str) -> str:
+def repair_text(value: str) -> str:
     if not isinstance(value, str):
         return value
     if not any(marker in value for marker in ("å", "æ", "ç", "ï", "ä", "", "")):
@@ -46,7 +46,7 @@ class AppSettings:
         repaired = False
         for field_name in REPAIRABLE_TEXT_FIELDS:
             current = data.get(field_name)
-            fixed = _repair_mojibake(current)
+            fixed = repair_text(current)
             if fixed != current:
                 data[field_name] = fixed
                 repaired = True
@@ -85,7 +85,10 @@ class AppSettings:
         data = asdict(self)
         data["account"] = self._mask(self.account)
         data["password"] = "******" if self.password else ""
-        data["coco_keywords"] = list(self.coco_keywords)
+        data["search_tts"] = repair_text(self.search_tts)
+        data["found_tts"] = repair_text(self.found_tts)
+        data["error_tts"] = repair_text(self.error_tts)
+        data["coco_keywords"] = [repair_text(keyword) for keyword in self.coco_keywords]
         data["selected_dids"] = list(self.selected_dids)
         data["manual_target_dids"] = list(self.manual_target_dids)
         return data
