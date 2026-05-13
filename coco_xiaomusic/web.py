@@ -22,6 +22,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="coco-xiaomusic", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
+app.mount("/media", StaticFiles(directory=BASE_DIR / "music" / "tmp"), name="media")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -40,6 +41,11 @@ async def api_events():
     return {"items": service.events()}
 
 
+@app.post("/api/events/clear")
+async def api_clear_events():
+    return service.clear_events()
+
+
 @app.get("/api/search-preview")
 async def api_search_preview(keyword: str):
     return await service.search_preview(keyword)
@@ -55,13 +61,33 @@ async def api_play(keyword: str = Form(...), target_dids: str = Form("")):
         raise HTTPException(status_code=503, detail="service is still starting")
     targets = _parse_csv(target_dids) or list(settings.manual_target_dids) or list(settings.selected_dids)
     if not targets:
-        raise HTTPException(status_code=409, detail="请先选择目标音箱")
+        raise HTTPException(status_code=409, detail="请先选择至少一台目标音箱")
     return await service.play_keyword(targets[0], keyword)
 
 
 @app.post("/api/stop")
 async def api_stop(target_dids: str = Form("")):
     return await service.stop_playback(_parse_csv(target_dids))
+
+
+@app.post("/api/pause")
+async def api_pause(target_dids: str = Form("")):
+    return await service.pause_playback(_parse_csv(target_dids))
+
+
+@app.post("/api/resume")
+async def api_resume(target_dids: str = Form("")):
+    return await service.resume_playback(_parse_csv(target_dids))
+
+
+@app.post("/api/volume")
+async def api_volume(volume: int = Form(...), target_dids: str = Form("")):
+    return await service.set_volume(volume, _parse_csv(target_dids))
+
+
+@app.get("/api/player-status")
+async def api_player_status(target_dids: str = ""):
+    return await service.player_status(_parse_csv(target_dids))
 
 
 @app.post("/api/setup/account")
@@ -98,14 +124,15 @@ async def api_play_selected(
     provider: str = Form(...),
     title: str = Form(""),
     artist: str = Form(""),
+    cover: str = Form(""),
     target_dids: str = Form(""),
 ):
     if not service.state.ready:
         raise HTTPException(status_code=503, detail="service is still starting")
     targets = _parse_csv(target_dids) or list(settings.manual_target_dids) or list(settings.selected_dids)
     if not targets:
-        raise HTTPException(status_code=409, detail="请先选择目标音箱")
-    return await service.play_selected_song(song_id, provider, title, artist, targets)
+        raise HTTPException(status_code=409, detail="请先选择至少一台目标音箱")
+    return await service.play_selected_song(song_id, provider, title, artist, cover, targets)
 
 
 @app.post("/api/setup/runtime")

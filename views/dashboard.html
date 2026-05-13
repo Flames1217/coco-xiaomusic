@@ -4,196 +4,174 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>coco-xiaomusic 控制台</title>
-  <link rel="stylesheet" href="/assets/dashboard.css">
+  <link rel="stylesheet" href="/assets/dashboard.css?v=20260513-r6">
 </head>
 <body>
-  <main class="workspace">
-    <header class="masthead">
-      <div>
+  <main class="ops-shell">
+    <header class="topbar">
+      <div class="brand">
         <p class="eyebrow">coco-xiaomusic</p>
         <h1>小爱音箱播放控制台</h1>
-        <p class="subtitle">语音命中“点歌”后，立即静默接管，再接入 coco 搜索和推流播放。</p>
+        <p class="subtitle">点歌接管、coco 搜索、设备推流与实时状态集中在一个台面。</p>
       </div>
-      <div class="runtime" id="runtime-card">
+      <section class="runtime-card">
         <span class="runtime-dot"></span>
         <div>
           <strong id="runtime-title">启动中</strong>
-          <span id="runtime-copy">正在连接小爱与 coco</span>
+          <span id="runtime-copy">等待 xiaomusic 就绪</span>
         </div>
-      </div>
+      </section>
     </header>
 
-    <section class="summary-grid">
-      <article class="metric">
-        <span>语音监听设备</span>
-        <strong id="device-id">--</strong>
-      </article>
-      <article class="metric">
-        <span>coco 服务</span>
-        <strong id="coco-base">--</strong>
-      </article>
-      <article class="metric">
-        <span>最近口令</span>
-        <strong id="last-keyword">暂无</strong>
-      </article>
-      <article class="metric">
-        <span>最近播放</span>
-        <strong id="last-playback">暂无</strong>
-      </article>
+    <section class="metric-strip">
+      <article><span>监听设备</span><strong id="device-id">--</strong></article>
+      <article><span>最近口令</span><strong id="last-keyword">暂无</strong></article>
+      <article><span>最近播放</span><strong id="last-playback">暂无</strong></article>
+      <article><span>coco 服务</span><strong id="coco-base">--</strong></article>
     </section>
 
-    <section class="surface onboarding compact-panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">First Run</p>
-          <h2>从 0 到可播放</h2>
+    <section class="console-layout">
+      <aside class="panel side-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Setup</p>
+            <h2>账号与设备</h2>
+          </div>
         </div>
-      </div>
-      <div class="steps">
-        <article class="step" id="step-account">
-          <span>1</span>
-          <div>
-            <strong>配置小米账号</strong>
-            <p id="step-account-copy">等待检查</p>
-          </div>
-        </article>
-        <article class="step" id="step-token">
-          <span>2</span>
-          <div>
-            <strong>登录并生成 token</strong>
-            <p id="step-token-copy">首次启动会自动触发 xiaomusic 登录流程</p>
-          </div>
-        </article>
-        <article class="step" id="step-device">
-          <span>3</span>
-          <div>
-            <strong>识别目标音箱</strong>
-            <p id="step-device-copy">等待设备列表</p>
-          </div>
-        </article>
-        <article class="step" id="step-ready">
-          <span>4</span>
-          <div>
-            <strong>开始语音和后台推送</strong>
-            <p id="step-ready-copy">等待服务就绪</p>
-          </div>
-        </article>
-      </div>
-      <form id="account-form" class="setup-form">
-        <label>
-          <span>小米账号</span>
-          <input name="account" placeholder="手机号或账号" autocomplete="username" required>
-        </label>
-        <label>
-          <span>小米密码</span>
-          <input name="password" type="password" placeholder="输入密码" autocomplete="current-password" required>
-        </label>
-        <label>
-          <span>本机访问地址</span>
-          <input name="hostname" value="http://192.168.1.13" required>
-        </label>
-        <button type="submit">保存账号并开始登录</button>
-      </form>
-      <div id="account-locked" class="account-locked hidden">
-        <div>
-          <strong>账号已保存</strong>
-          <p>为了避免误改，登录配置已锁定。</p>
-        </div>
-        <button type="button" id="edit-account-button" class="ghost">编辑账号</button>
-      </div>
-      <div class="device-toolbar">
-        <div>
-          <strong>设备接入</strong>
-          <p>可勾选多台设备参与语音监听，并单独指定后台默认推送目标。</p>
-        </div>
-        <button type="button" id="save-devices-button">保存设备方案</button>
-      </div>
-      <div class="device-list" id="device-list"></div>
-    </section>
 
-    <section class="console-grid">
-      <article class="surface controls console-panel">
-        <div class="section-head">
+        <div class="step-stack">
+          <article class="step" id="step-account"><span>1</span><div><strong>账号</strong><p id="step-account-copy">等待配置</p></div></article>
+          <article class="step" id="step-token"><span>2</span><div><strong>Token</strong><p id="step-token-copy">等待配置</p></div></article>
+          <article class="step" id="step-device"><span>3</span><div><strong>设备</strong><p id="step-device-copy">等待配置</p></div></article>
+          <article class="step" id="step-ready"><span>4</span><div><strong>服务</strong><p id="step-ready-copy">等待配置</p></div></article>
+        </div>
+
+        <form id="account-form" class="stack-form">
+          <label><span>小米账号</span><input name="account" placeholder="手机号或账号" autocomplete="username" required></label>
+          <label><span>小米密码</span><input name="password" type="password" placeholder="输入密码" autocomplete="current-password" required></label>
+          <label><span>本机访问地址</span><input name="hostname" value="http://192.168.1.13" required></label>
+          <button type="submit">保存账号并开始登录</button>
+        </form>
+
+        <div id="account-locked" class="locked hidden">
+          <div><strong>账号已保存</strong><p>避免误改，当前配置已锁定。</p></div>
+          <button type="button" id="edit-account-button" class="ghost">编辑</button>
+        </div>
+
+        <div class="device-head">
+          <div><strong>设备接入</strong><p>监听与后台推送可分开配置。</p></div>
+          <button type="button" id="save-devices-button">保存方案</button>
+        </div>
+        <div class="device-list" id="device-list"></div>
+      </aside>
+
+      <section class="panel work-panel">
+        <div class="panel-head">
           <div>
             <p class="eyebrow">Playback</p>
-            <h2>手动推送播放</h2>
+            <h2>点歌与播放器</h2>
           </div>
-          <button class="ghost" id="stop-button" type="button">停止播放</button>
         </div>
 
-        <form id="play-form" class="play-form">
-          <label>
-            <span>歌曲关键词</span>
-            <input id="keyword" name="keyword" placeholder="例如：关键词" autocomplete="off" required>
-          </label>
-          <button type="submit">语音策略测试：播第一条</button>
+        <section class="music-player">
+          <div class="track-identity">
+            <div class="album-art" aria-hidden="true">
+              <img id="player-cover" alt="">
+              <span id="player-initial">CO</span>
+            </div>
+            <div>
+              <div class="track-title-line">
+                <strong id="player-track">暂无歌曲</strong>
+                <span id="player-artist">--</span>
+              </div>
+              <p id="player-meta"></p>
+            </div>
+          </div>
+          <div class="player-main">
+            <div class="player-actions" aria-label="播放器控制">
+              <button type="button" id="refresh-player-button" class="icon-button" title="刷新状态">↻</button>
+              <button type="button" id="pause-button" class="play-button" title="播放">▶</button>
+              <button class="icon-button danger" id="stop-button" type="button" title="停止">■</button>
+            </div>
+            <div class="progress-row">
+              <span id="player-elapsed">--:--</span>
+              <div class="progress-track"><span id="player-progress"></span></div>
+              <span id="player-duration">--:--</span>
+            </div>
+          </div>
+          <div class="volume-zone">
+            <span class="play-state" id="player-state"></span>
+            <label class="volume-control">
+              <span id="player-volume">音量 --</span>
+              <input id="volume-slider" type="range" min="0" max="100" value="8">
+              <input id="volume-input" type="number" min="0" max="100" step="1" value="8" aria-label="音量">
+            </label>
+            <span id="player-did">DID --</span>
+          </div>
+        </section>
+
+        <form id="play-form" class="search-form">
+          <label><span>歌曲关键词</span><input id="keyword" name="keyword" placeholder="例如：七朵组合的咏春" autocomplete="off" required></label>
+          <button type="submit">播放第一条</button>
+          <button class="ghost" id="preview-button" type="button">搜索全部</button>
         </form>
 
-        <div class="preview" id="preview">
-          <span class="label">搜索预览</span>
-          <strong id="preview-title">输入关键词后搜索 coco 全部结果</strong>
-          <p id="preview-copy">前端可手动选择任意一条推送，语音口令仍默认第一条。</p>
-          <button class="ghost compact" id="preview-button" type="button">搜索全部结果</button>
+        <section class="results-board">
+          <div class="results-head">
+            <div>
+              <span class="label">搜索结果</span>
+              <strong id="preview-title">等待搜索</strong>
+              <p id="preview-copy">语音命令默认第一条，前端可手动推送任意结果。</p>
+            </div>
+          </div>
+          <div class="provider-filter" id="provider-filter" aria-label="渠道筛选"></div>
           <div class="preview-list" id="preview-list"></div>
+        </section>
+      </section>
+
+      <section class="panel signal-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Signals</p>
+            <h2>策略与日志</h2>
+          </div>
         </div>
+
+        <section class="strategy-card">
+          <dl class="settings-list">
+            <div><dt>静默接管延迟</dt><dd id="delay-sec">--</dd></div>
+            <div><dt>触发关键词</dt><dd id="keywords">--</dd></div>
+            <div><dt>搜索提示</dt><dd id="search-tts">--</dd></div>
+            <div><dt>命中提示</dt><dd id="found-tts">--</dd></div>
+          </dl>
+          <div class="command-row">
+            <span>点歌 七朵组合的咏春</span>
+            <span>点一首 袁艺菲的缺月</span>
+          </div>
+        </section>
+
+        <form id="runtime-form" class="runtime-form">
+          <label><span>coco 服务地址</span><input name="coco_base" id="runtime-coco-base" required></label>
+          <label><span>静默接管延迟秒数</span><input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required></label>
+          <label><span>搜索提示话术</span><input name="search_tts" id="runtime-search-tts" required></label>
+          <label><span>命中提示话术</span><input name="found_tts" id="runtime-found-tts" required></label>
+          <label><span>失败提示话术</span><input name="error_tts" id="runtime-error-tts" required></label>
+          <button type="submit">保存策略</button>
+        </form>
+
+        <section class="log-board">
+          <div class="results-head">
+            <div><span class="label">实时日志</span><strong>运行事件</strong></div>
+            <button type="button" id="clear-events-button" class="ghost compact-button">清理日志</button>
+          </div>
+          <div id="events" class="events"></div>
+        </section>
 
         <pre id="action-result">等待操作...</pre>
-      </article>
-
-      <article class="surface settings console-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Voice Flow</p>
-            <h2>当前语音策略</h2>
-          </div>
-        </div>
-        <dl class="settings-list">
-          <div><dt>官方应答缓冲</dt><dd id="delay-sec">--</dd></div>
-          <div><dt>搜索提示</dt><dd id="search-tts">--</dd></div>
-          <div><dt>命中提示</dt><dd id="found-tts">--</dd></div>
-          <div><dt>触发关键词</dt><dd id="keywords">--</dd></div>
-        </dl>
-        <div class="command-row">
-          <span>点歌 袁艺菲的缺月</span>
-          <span>点一首 关键词</span>
-          <span>搜歌 关键词</span>
-        </div>
-        <form id="runtime-form" class="runtime-form">
-          <label>
-            <span>coco 服务地址</span>
-            <input name="coco_base" id="runtime-coco-base" required>
-          </label>
-          <label>
-            <span>静默接管延迟秒数</span>
-            <input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required>
-          </label>
-          <label>
-            <span>搜索提示话术</span>
-            <input name="search_tts" id="runtime-search-tts" required>
-          </label>
-          <label>
-            <span>命中提示话术</span>
-            <input name="found_tts" id="runtime-found-tts" required>
-          </label>
-          <label>
-            <span>失败提示话术</span>
-            <input name="error_tts" id="runtime-error-tts" required>
-          </label>
-          <button type="submit">保存播放策略</button>
-        </form>
-      </article>
-      <article class="surface activity console-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Activity</p>
-            <h2>运行事件</h2>
-          </div>
-        </div>
-        <div id="events" class="events"></div>
-      </article>
+      </section>
     </section>
   </main>
 
-  <script src="/assets/dashboard.js"></script>
+  <script src="/assets/dashboard.js?v=20260513-r6"></script>
 </body>
 </html>

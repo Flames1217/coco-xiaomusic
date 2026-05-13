@@ -1,5 +1,5 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 
@@ -11,8 +11,6 @@ DEFAULT_KEYWORDS = ("点歌", "点一首", "搜歌", "可可", "coco", "COCO", "
 
 def repair_text(value: str) -> str:
     if not isinstance(value, str):
-        return value
-    if not any(marker in value for marker in ("å", "æ", "ç", "ï", "ä", "", "")):
         return value
     try:
         repaired = value.encode("latin1").decode("utf-8")
@@ -29,16 +27,15 @@ class AppSettings:
     manual_target_dids: tuple[str, ...] = ()
     hostname: str = "http://192.168.1.13"
     xiaomusic_port: int = 8090
-    admin_host: str = "127.0.0.1"
+    admin_host: str = "0.0.0.0"
     admin_port: int = 8088
     coco_base: str = "https://coco.viper3.top"
     official_answer_delay_sec: float = 0.0
-    search_tts: str = "小爱正在用coco搜索{keyword}"
-    found_tts: str = "搜到啦，马上为你播放{artist}的{title}"
-    error_tts: str = "coco暂时没有拿到可播放的第一条结果"
+    search_tts: str = "小爱正在用 coco 搜索 {keyword}"
+    found_tts: str = "搜到啦，马上为你播放 {artist} 的 {title}"
+    error_tts: str = "coco 暂时没拿到可播放的结果，已为你换一个试试"
     edge_tts_voice: str = "zh-CN-XiaoyiNeural"
     coco_keywords: tuple[str, ...] = DEFAULT_KEYWORDS
-    query_replacements: dict[str, str] = None
     device_aliases: dict[str, str] = None
 
     @classmethod
@@ -55,21 +52,23 @@ class AppSettings:
                 repaired = True
         keywords = data.get("coco_keywords")
         if isinstance(keywords, list):
-            data["coco_keywords"] = tuple(keywords)
+            data["coco_keywords"] = tuple(repair_text(item) for item in keywords)
         if tuple(data.get("coco_keywords", ())) == LEGACY_KEYWORDS:
             data["coco_keywords"] = DEFAULT_KEYWORDS
-            repaired = True
-        if float(data.get("official_answer_delay_sec", 0.0) or 0.0) != 0.0:
-            data["official_answer_delay_sec"] = 0.0
             repaired = True
         for key in ("selected_dids", "manual_target_dids"):
             if isinstance(data.get(key), list):
                 data[key] = tuple(data[key])
+        if data.get("admin_host") in ("", "127.0.0.1", "localhost"):
+            data["admin_host"] = "0.0.0.0"
+            repaired = True
         legacy_did = data.pop("did", "")
         if legacy_did and not data.get("selected_dids"):
             data["selected_dids"] = (legacy_did,)
         if legacy_did and not data.get("manual_target_dids"):
             data["manual_target_dids"] = (legacy_did,)
+        known_fields = {field.name for field in fields(cls)}
+        data = {key: value for key, value in data.items() if key in known_fields}
         loaded = cls(**data)
         if repaired:
             loaded.save()
@@ -87,8 +86,6 @@ class AppSettings:
         )
 
     def __post_init__(self):
-        if self.query_replacements is None:
-            self.query_replacements = {"雀跃": "缺月", "溯": "宿"}
         if self.device_aliases is None:
             self.device_aliases = {}
 

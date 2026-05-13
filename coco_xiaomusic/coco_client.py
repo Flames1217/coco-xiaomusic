@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from difflib import SequenceMatcher
+import re
 import time
-from urllib.parse import urlparse
 
 import requests
 
@@ -12,6 +11,11 @@ class CocoSong:
     provider: str
     title: str = ""
     artist: str = ""
+    album: str = ""
+    cover: str = ""
+    duration: str | int | float = ""
+    audio_type: str = ""
+    bitrate: str = ""
     raw: dict | None = None
 
 
@@ -47,25 +51,110 @@ class CocoClient:
         songs = []
         source_items = items if limit is None else items[:limit]
         for item in source_items:
+            cover = str(item.get("cover") or item.get("extra", {}).get("cover") or "")
+            duration = (
+                item.get("duration")
+                or item.get("interval")
+                or item.get("time")
+                or item.get("songTimeMinutes")
+                or item.get("song_time")
+                or item.get("extra", {}).get("duration")
+                or ""
+            )
             songs.append(
                 CocoSong(
                     id=str(item.get("id", "")),
                     provider=str(item.get("provider", "")),
                     title=str(item.get("title", "")),
                     artist=str(item.get("artist", "")),
+                    album=str(item.get("album", "")),
+                    cover=cover,
+                    duration=duration,
                     raw=item,
                 )
             )
         return songs
 
-    def resolve_url(self, song: CocoSong) -> str | None:
+    def resolve_info(self, song: CocoSong) -> dict:
         play_info = self._get_json(
             "/api/url",
             params={"id": song.id, "provider": song.provider},
-            timeout=15,
-            attempts=2,
+            timeout=8,
+            attempts=1,
         )
-        return play_info.get("url")
+        cover = play_info.get("cover")
+        if cover and song.raw is not None and not song.raw.get("cover"):
+            song.raw["cover"] = cover
+            song.cover = str(cover)
+        audio_type = play_info.get("type") or play_info.get("format")
+        bitrate = play_info.get("bitrate") or play_info.get("quality")
+        duration = play_info.get("duration") or play_info.get("interval") or play_info.get("time")
+        if not duration and play_info.get("url") and bitrate:
+            duration = self._estimate_duration(play_info["url"], str(bitrate))
+        if song.raw is not None:
+            if audio_type:
+                song.raw["audio_type"] = str(audio_type)
+            if bitrate:
+                song.raw["bitrate"] = str(bitrate)
+            if duration and not song.raw.get("duration"):
+                song.raw["duration"] = duration
+        song.audio_type = str(audio_type or song.audio_type or "")
+        song.bitrate = str(bitrate or song.bitrate or "")
+        if duration and not song.duration:
+            song.duration = duration
+        return play_info
+
+    @staticmethod
+    def _bitrate_to_bps(value: str) -> int:
+        match = re.search(r"(\d+(?:\.\d+)?)\s*k", value.lower())
+        if match:
+            return int(float(match.group(1)) * 1000)
+        match = re.search(r"(\d+(?:\.\d+)?)\s*m", value.lower())
+        if match:
+            return int(float(match.group(1)) * 1000 * 1000)
+        return 0
+
+    def _estimate_duration(self, url: str, bitrate: str) -> int | None:
+        bits_per_second = self._bitrate_to_bps(bitrate)
+        if not bits_per_second:
+            return None
+        try:
+            response = requests.head(
+                url,
+                allow_redirects=True,
+                timeout=5,
+                headers={"User-Agent": "coco-xiaomusic/1.0"},
+            )
+            size = int(response.headers.get("content-length") or 0)
+        except (requests.RequestException, ValueError):
+            return None
+        if size <= 0:
+            return None
+        return max(1, round(size * 8 / bits_per_second))
+
+    def resolve_url(self, song: CocoSong) -> str | None:
+        return self.resolve_info(song).get("url")
+
+    def is_playable_url(self, url: str) -> bool:
+        try:
+            response = requests.get(
+                url,
+                headers={"Range": "bytes=0-31", "User-Agent": "coco-xiaomusic/1.0"},
+                stream=True,
+                timeout=8,
+            )
+            if response.status_code >= 400:
+                return False
+            content_type = response.headers.get("content-type", "").lower()
+            chunk = next(response.iter_content(32), b"")
+            if chunk.lstrip().startswith((b"{", b"<")):
+                return False
+            return (
+                "audio" in content_type
+                or chunk.startswith((b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"fLaC", b"OggS", b"RIFF"))
+            )
+        except requests.RequestException:
+            return False
 
     def search_first(self, keyword: str) -> tuple[CocoSong | None, str | None]:
         songs = self.search_items(keyword, limit=1)
@@ -73,42 +162,3 @@ class CocoClient:
             return None, None
         song = songs[0]
         return song, self.resolve_url(song)
-
-    def search_best(self, keyword: str, alternatives: list[str] | None = None) -> tuple[CocoSong | None, str | None, str]:
-        queries = [keyword, *(alternatives or [])]
-        seen = set()
-        candidates: list[tuple[float, CocoSong, str]] = []
-        last_error = None
-        for query in queries:
-            query = query.strip()
-            if not query or query in seen:
-                continue
-            seen.add(query)
-            try:
-                songs = self.search_items(query, limit=5)
-            except requests.RequestException as exc:
-                last_error = exc
-                continue
-            for song in songs:
-                haystack = f"{song.artist}{song.title}"
-                score = SequenceMatcher(None, query, haystack).ratio()
-                candidates.append((score, song, query))
-        if not candidates:
-            if last_error is not None:
-                raise last_error
-            return None, None, keyword
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        fallback: tuple[CocoSong, str, str] | None = None
-        for _, song, query in candidates:
-            url = self.resolve_url(song)
-            if not url:
-                continue
-            if fallback is None:
-                fallback = (song, url, query)
-            suffix = urlparse(url).path.lower()
-            extension = next((ext for ext in self.SUPPORTED_EXTENSIONS if suffix.endswith(ext)), "")
-            if extension or "." not in suffix.rsplit("/", 1)[-1]:
-                return song, url, query
-        if fallback is not None:
-            return fallback
-        return None, None, keyword
