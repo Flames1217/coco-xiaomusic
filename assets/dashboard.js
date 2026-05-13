@@ -504,7 +504,18 @@ function renderPreviewItems(items) {
       </div>
       <div class="result-actions">
         ${badge}
-        <button type="button" data-song-id="${song.id || ""}" data-provider="${provider}" data-title="${song.title || ""}" data-artist="${song.artist || ""}" data-cover="${cover}">推送</button>
+        <button
+          type="button"
+          data-song-id="${song.id || ""}"
+          data-provider="${provider}"
+          data-title="${song.title || ""}"
+          data-artist="${song.artist || ""}"
+          data-cover="${cover}"
+          data-duration="${song.duration || song.interval || song.time || song.extra?.duration || ""}"
+          data-album="${album}"
+          data-audio-type="${audioType}"
+          data-bitrate="${bitrate}"
+        >推送</button>
       </div>
     `;
 
@@ -516,6 +527,10 @@ function renderPreviewItems(items) {
       body.set("title", target.dataset.title || "");
       body.set("artist", target.dataset.artist || "");
       body.set("cover", target.dataset.cover || "");
+      body.set("duration", target.dataset.duration || "");
+      body.set("album", target.dataset.album || "");
+      body.set("audio_type", target.dataset.audioType || "");
+      body.set("bitrate", target.dataset.bitrate || "");
       await runAction("正在推送选中的歌曲...", "/api/play-selected", body);
       showBottomPlayer();
       latestPlayerStatus = 1;

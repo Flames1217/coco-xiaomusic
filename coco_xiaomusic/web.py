@@ -146,6 +146,10 @@ async def api_play_selected(
     title: str = Form(""),
     artist: str = Form(""),
     cover: str = Form(""),
+    duration: str = Form(""),
+    album: str = Form(""),
+    audio_type: str = Form(""),
+    bitrate: str = Form(""),
     target_dids: str = Form(""),
 ):
     if not service.state.ready:
@@ -153,7 +157,18 @@ async def api_play_selected(
     targets = _parse_csv(target_dids) or list(settings.manual_target_dids) or list(settings.selected_dids)
     if not targets:
         raise HTTPException(status_code=409, detail="请先选择至少一台目标音箱")
-    return await service.play_selected_song(song_id, provider, title, artist, cover, targets)
+    return await service.play_selected_song(
+        song_id,
+        provider,
+        title,
+        artist,
+        cover,
+        duration,
+        album,
+        audio_type,
+        bitrate,
+        targets,
+    )
 
 
 @app.post("/api/setup/runtime")

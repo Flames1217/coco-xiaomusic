@@ -68,6 +68,7 @@ class CocoXiaoMusicService:
         self._pause_verify_tasks: dict[str, asyncio.Task] = {}
         self._stream_sources: dict[str, dict] = {}
         self._control_version = 0
+        self._last_mina_error_log_at: dict[str, float] = {}
         self._patch_online_play()
         self._patch_command_observer()
 
@@ -779,7 +780,7 @@ class CocoXiaoMusicService:
                     results.append({"did": did, "success": False, "error": "device not found"})
                     continue
             push_ret = await self.xiaomusic.play_url(did, local_url)
-            status = await self._poll_player_status(did, max_tries=3)
+            status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(push_ret) == 0)
             results.append(
                 {
                     "did": did,
@@ -796,15 +797,32 @@ class CocoXiaoMusicService:
             )
         return results
 
-    async def _poll_player_status(self, did: str, max_tries: int = 3):
+    async def _poll_player_status(self, did: str, max_tries: int = 3, assume_playing: bool = False):
         status = {}
         for index in range(max_tries):
-            status = await self.xiaomusic.get_player_status(did=did)
+            try:
+                status = await self.xiaomusic.get_player_status(did=did)
+            except Exception as exc:
+                return self._fallback_player_status(did, exc, assume_playing=assume_playing)
             if status.get("status") == 1:
                 return status
             if index + 1 < max_tries:
                 await asyncio.sleep(1.0)
         return status
+
+    def _fallback_player_status(self, did: str, exc: Exception | None = None, assume_playing: bool = False) -> dict:
+        if exc is not None:
+            now = time.monotonic()
+            last = self._last_mina_error_log_at.get(did, 0)
+            if now - last > 30:
+                self._last_mina_error_log_at[did] = now
+                self._log("warn", f"Mina 拉取失败 did={did}，播放器使用本地状态兜底：{exc!r}")
+        return {
+            "status": 2 if self.state.playback_paused else (1 if (assume_playing or self.state.last_used_url) else 0),
+            "volume": None,
+            "loop_type": 1,
+            "local_fallback": True,
+        }
 
     def _cancel_pause_verify(self, did: str):
         task = self._pause_verify_tasks.pop(did, None)
@@ -874,6 +892,10 @@ class CocoXiaoMusicService:
         title: str,
         artist: str,
         cover: str = "",
+        duration: str = "",
+        album: str = "",
+        audio_type: str = "",
+        bitrate: str = "",
         target_dids: list[str] | None = None,
     ):
         if not self.xiaomusic:
@@ -887,8 +909,22 @@ class CocoXiaoMusicService:
             provider=provider,
             title=title,
             artist=artist,
+            album=album,
             cover=cover,
-            raw={"id": song_id, "provider": provider, "title": title, "artist": artist, "cover": cover},
+            duration=duration,
+            audio_type=audio_type,
+            bitrate=bitrate,
+            raw={
+                "id": song_id,
+                "provider": provider,
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "cover": cover,
+                "duration": duration,
+                "audio_type": audio_type,
+                "bitrate": bitrate,
+            },
         )
         try:
             url = await asyncio.get_running_loop().run_in_executor(None, self.coco.resolve_url, song)
@@ -1006,7 +1042,7 @@ class CocoXiaoMusicService:
         for did in targets:
             try:
                 ret = await self.xiaomusic.play_url(did, seek_url)
-                status = await self._poll_player_status(did, max_tries=3)
+                status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(ret) == 0)
                 results.append({"did": did, "success": status.get("status") == 1, "ret": ret, "status": status})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
@@ -1049,7 +1085,14 @@ class CocoXiaoMusicService:
                 status = await self.xiaomusic.get_player_status(did=did)
                 results.append({"did": did, "success": True, "status": status})
             except Exception as exc:
-                results.append({"did": did, "success": False, "error": repr(exc)})
+                results.append(
+                    {
+                        "did": did,
+                        "success": True,
+                        "warning": repr(exc),
+                        "status": self._fallback_player_status(did, exc),
+                    }
+                )
         return {"success": any(item["success"] for item in results), "targets": results}
 
     async def update_account(self, account: str, password: str, hostname: str):
