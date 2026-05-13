@@ -22,8 +22,8 @@ body {
 }
 
 .workspace {
-  width: min(1180px, calc(100vw - 32px));
-  margin: 28px auto 40px;
+  width: min(1440px, calc(100vw - 28px));
+  margin: 18px auto 24px;
 }
 
 .masthead, .section-head, .runtime, .summary-grid, .content-grid, .command-row {
@@ -34,7 +34,7 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 20px;
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 
 .eyebrow {
@@ -50,7 +50,7 @@ h1, h2, p {
 }
 
 h1 {
-  font-size: 34px;
+  font-size: 30px;
   line-height: 1.15;
 }
 
@@ -88,7 +88,7 @@ h1 {
 
 .summary-grid {
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .metric, .surface {
@@ -124,7 +124,11 @@ h1 {
 }
 
 .onboarding {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
+}
+
+.compact-panel {
+  padding: 16px;
 }
 
 .steps {
@@ -284,12 +288,18 @@ h1 {
   padding: 18px;
 }
 
-.controls {
-  flex: 1.35;
+.console-grid {
+  display: grid;
+  grid-template-columns: minmax(460px, 1.35fr) minmax(320px, 0.95fr) minmax(360px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  min-height: min(720px, calc(100vh - 330px));
 }
 
-.settings {
-  flex: 1;
+.console-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .section-head {
@@ -362,6 +372,10 @@ button.compact {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+  min-height: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .preview-item {
@@ -433,7 +447,8 @@ pre {
 
 pre {
   margin: 16px 0 0;
-  min-height: 118px;
+  min-height: 100px;
+  max-height: 150px;
   padding: 14px;
   overflow: auto;
   border-radius: 8px;
@@ -451,6 +466,9 @@ pre {
   display: grid;
   gap: 12px;
   margin-top: 18px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .runtime-form input {
@@ -487,6 +505,10 @@ pre {
 .events {
   display: grid;
   gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  align-content: start;
 }
 
 .event {
@@ -507,6 +529,19 @@ pre {
 .event.warn .event-level { color: var(--amber); }
 .event.error .event-level { color: var(--red); }
 .event.info .event-level { color: var(--blue); }
+
+@media (max-width: 1180px) {
+  .console-grid {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .preview-list,
+  .events,
+  .runtime-form {
+    max-height: 360px;
+  }
+}
 
 @media (max-width: 900px) {
   .masthead, .summary-grid, .content-grid, .device-toolbar {
