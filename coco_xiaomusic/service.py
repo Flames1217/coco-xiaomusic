@@ -49,6 +49,8 @@ class CocoXiaoMusicService:
         self.state = RuntimeState()
         self.xiaomusic: XiaoMusic | None = None
         self._runner_task: asyncio.Task | None = None
+        self._mina_watch_task: asyncio.Task | None = None
+        self._last_mina_timestamp: dict[str, int] = {}
         self._patch_online_play()
         self._patch_command_observer()
 
@@ -121,7 +123,6 @@ class CocoXiaoMusicService:
             hostname=self.settings.hostname,
             port=self.settings.xiaomusic_port,
             enable_pull_ask=True,
-            get_ask_by_mina=True,
             enable_force_stop=True,
             pull_ask_sec=1,
             edge_tts_voice=self.settings.edge_tts_voice,
@@ -146,6 +147,9 @@ class CocoXiaoMusicService:
         if self._runner_task:
             self._runner_task.cancel()
             self._runner_task = None
+        if self._mina_watch_task:
+            self._mina_watch_task.cancel()
+            self._mina_watch_task = None
         self.state.ready = False
         self.state.starting = False
         self.xiaomusic = None
@@ -164,6 +168,7 @@ class CocoXiaoMusicService:
             self.state.starting = False
             self.state.startup_error = ""
             self._log("ok", "xiaomusic 服务已就绪")
+            self._mina_watch_task = asyncio.create_task(self._watch_mina_latest_ask())
             await self.xiaomusic.run_forever()
         except Exception as exc:
             self.state.ready = False
@@ -196,6 +201,56 @@ class CocoXiaoMusicService:
                     "hardware": str(item.get("hardware", "") or ""),
                 }
             )
+
+    async def _watch_mina_latest_ask(self):
+        initialized: set[str] = set()
+        while True:
+            try:
+                if not self.xiaomusic:
+                    await asyncio.sleep(1)
+                    continue
+                auth_manager = getattr(self.xiaomusic, "auth_manager", None)
+                mina_service = getattr(auth_manager, "mina_service", None)
+                device_manager = getattr(self.xiaomusic, "device_manager", None)
+                if not mina_service or not device_manager:
+                    await asyncio.sleep(1)
+                    continue
+                for device_id, did in device_manager.device_id_did.items():
+                    try:
+                        messages = await mina_service.get_latest_ask(device_id)
+                    except Exception as exc:
+                        self._log("warn", f"Mina 拉取失败 did={did}：{exc!r}")
+                        continue
+                    pending: list[tuple[int, str]] = []
+                    latest_ts = self._last_mina_timestamp.get(did, 0)
+                    for message in messages or []:
+                        timestamp = int(getattr(message, "timestamp_ms", 0) or 0)
+                        if timestamp <= latest_ts:
+                            continue
+                        answers = getattr(getattr(message, "response", None), "answer", []) or []
+                        if not answers:
+                            continue
+                        query = str(getattr(answers[0], "question", "") or "").strip()
+                        if query:
+                            pending.append((timestamp, query))
+                    if did not in initialized:
+                        if pending:
+                            self._last_mina_timestamp[did] = max(item[0] for item in pending)
+                        initialized.add(did)
+                        continue
+                    for timestamp, query in sorted(pending):
+                        self._last_mina_timestamp[did] = max(
+                            self._last_mina_timestamp.get(did, 0),
+                            timestamp,
+                        )
+                        self._log("info", f"Mina 捕获语音：{query}", keyword=query)
+                        await self.xiaomusic.do_check_cmd(did=did, query=query, ctrl_panel=False)
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._log("warn", f"Mina 监听循环异常：{exc!r}")
+                await asyncio.sleep(2)
 
     async def play_keyword(self, did: str, keyword: str):
         if not self.xiaomusic:
