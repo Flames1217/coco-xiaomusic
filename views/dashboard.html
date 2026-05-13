@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>coco-xiaomusic 控制台</title>
-  <link rel="stylesheet" href="/assets/dashboard.css?v=20260514-r1">
+  <link rel="stylesheet" href="/assets/dashboard.css?v=20260514-r2">
 </head>
 <body>
   <main class="ops-shell">
@@ -156,7 +156,10 @@
       </div>
       <div class="progress-row">
         <span id="player-elapsed">0:00</span>
-        <div class="progress-track"><span id="player-progress"></span></div>
+        <div class="progress-track">
+          <span id="player-progress"></span>
+          <input id="progress-slider" type="range" min="0" max="100" step="1" value="0" aria-label="播放进度">
+        </div>
         <span id="player-duration">--:--</span>
       </div>
     </div>
@@ -173,6 +176,6 @@
     <span class="sr-only" id="player-meta"></span>
   </aside>
 
-  <script src="/assets/dashboard.js?v=20260514-r1"></script>
+  <script src="/assets/dashboard.js?v=20260514-r2"></script>
 </body>
 </html>

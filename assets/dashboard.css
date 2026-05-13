@@ -1,23 +1,25 @@
 :root {
   color-scheme: light;
-  --bg: #eef3f7;
+  --font-main: SFMono-Regular, ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Microsoft YaHei UI", monospace;
+  --bg: #f3f7fb;
   --surface: #ffffff;
   --surface-2: #f7fafc;
   --surface-3: #edf3f8;
-  --line: #d7e1eb;
+  --line: #dbe5ef;
   --ink: #17202a;
-  --text: #17202a;
-  --muted: #617184;
-  --blue: #1367e8;
-  --blue-soft: #eaf2ff;
+  --text: #243142;
+  --muted: #6b7a8c;
+  --blue: #1296db;
+  --blue-soft: #e8f5fd;
   --green: #15803d;
   --green-soft: #eafaf0;
   --amber: #b45309;
   --amber-soft: #fff5e8;
   --red: #c2410c;
   --red-soft: #fff0eb;
-  --shadow: 0 18px 50px rgba(22, 34, 48, 0.08);
-  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  --shadow: 0 16px 42px rgba(31, 49, 72, 0.08);
+  --radius: 12px;
+  font-family: var(--font-main);
 }
 
 * { box-sizing: border-box; }
@@ -26,6 +28,16 @@ body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
+  font-family: var(--font-main);
+  font-size: 14px;
+}
+
+button,
+input,
+select,
+textarea,
+pre {
+  font-family: var(--font-main);
 }
 
 .ops-shell {
@@ -255,29 +267,51 @@ input {
   width: 100%;
   min-height: 44px;
   border: 1px solid #c9d5e2;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 12px;
   background: #fff;
   color: var(--text);
   font-size: 15px;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(18, 150, 219, 0.14);
 }
 
 button {
   min-height: 44px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--blue);
   color: #fff;
   font-weight: 700;
   padding: 0 14px;
   cursor: pointer;
   white-space: nowrap;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+button:hover {
+  background: #0f86c4;
+  box-shadow: 0 8px 18px rgba(18, 150, 219, 0.18);
+}
+
+button:active {
+  transform: translateY(1px);
 }
 
 button.ghost {
   color: var(--blue);
   background: var(--blue-soft);
-  border: 1px solid #cfe0ff;
+  border: 1px solid #bde3f8;
+}
+
+button.ghost:hover {
+  background: #dff1fb;
+  box-shadow: none;
 }
 
 button.compact-button {
@@ -503,8 +537,8 @@ button.compact-button {
 }
 
 .progress-track {
+  position: relative;
   height: 5px;
-  overflow: hidden;
   border-radius: 999px;
   background: #edf3f8;
 }
@@ -516,6 +550,44 @@ button.compact-button {
   border-radius: inherit;
   background: #55c7ee;
   transition: width 0.18s ease;
+}
+
+#progress-slider {
+  position: absolute;
+  inset: 50% 0 auto;
+  width: 100%;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  appearance: none;
+  background: transparent;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+#progress-slider:focus {
+  box-shadow: none;
+}
+
+#progress-slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  appearance: none;
+  background: #1296db;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(18, 150, 219, 0.32);
+}
+
+#progress-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #1296db;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(18, 150, 219, 0.32);
 }
 
 .player-actions {
@@ -777,12 +849,56 @@ pre {
   padding: 14px;
   color: #edf3fb;
   background: #0f172a;
-  font-family: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+  font-family: var(--font-main);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   resize: vertical;
+}
+
+.runtime-card,
+.panel,
+.metric-strip article,
+.device-item,
+.preview-item,
+.event,
+.strategy-card,
+.results-board,
+.log-board,
+.locked,
+.device-head {
+  border-radius: var(--radius);
+}
+
+.runtime-card,
+.panel,
+.metric-strip article {
+  box-shadow: var(--shadow);
+}
+
+.panel,
+.metric-strip article,
+.runtime-card,
+.bottom-player {
+  backdrop-filter: saturate(1.05);
+}
+
+.metric-strip article,
+.step,
+.device-head,
+.locked,
+.results-board,
+.strategy-card,
+.log-board {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.metric-strip article:hover,
+.preview-item:hover,
+.device-item:hover {
+  border-color: #b9dff4;
+  box-shadow: 0 10px 26px rgba(31, 49, 72, 0.08);
 }
 
 .strategy-card {

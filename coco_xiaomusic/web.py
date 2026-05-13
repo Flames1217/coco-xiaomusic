@@ -80,6 +80,11 @@ async def api_resume(target_dids: str = Form("")):
     return await service.resume_playback(_parse_csv(target_dids))
 
 
+@app.post("/api/seek")
+async def api_seek(position: float = Form(...), target_dids: str = Form("")):
+    return await service.seek_playback(position, _parse_csv(target_dids))
+
+
 @app.post("/api/volume")
 async def api_volume(volume: int = Form(...), target_dids: str = Form("")):
     return await service.set_volume(volume, _parse_csv(target_dids))

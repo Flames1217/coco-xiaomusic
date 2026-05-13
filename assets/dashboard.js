@@ -3,6 +3,7 @@ const actionResult = qs("#action-result");
 const eventsNode = qs("#events");
 const keywordInput = qs("#keyword");
 const volumeSlider = qs("#volume-slider");
+const progressSlider = qs("#progress-slider");
 
 let latestStatus = null;
 let latestPlayerStatus = 0;
@@ -12,6 +13,8 @@ let volumeTimer = null;
 let volumeEditing = false;
 let volumeHoldUntil = 0;
 let lastVolumePointerUp = 0;
+let progressEditing = false;
+let lastProgressPointerUp = 0;
 let previewItems = [];
 let selectedProvider = "all";
 let currentPlaybackAt = "";
@@ -125,14 +128,24 @@ function currentProgressSeconds() {
   return Math.max(0, playerPositionSec || 0);
 }
 
-function updateProgress() {
-  const elapsed = currentProgressSeconds();
-  const capped = playerDurationSec > 0 ? Math.min(elapsed, playerDurationSec) : elapsed;
+function setProgressUI(seconds) {
+  const capped = playerDurationSec > 0 ? Math.min(Math.max(0, seconds), playerDurationSec) : Math.max(0, seconds);
   playerPositionSec = capped;
   setText("#player-elapsed", formatTime(capped));
   setText("#player-duration", playerDurationSec > 0 ? formatTime(playerDurationSec) : "--:--");
   const bar = qs("#player-progress");
-  if (bar) bar.style.width = playerDurationSec > 0 ? `${Math.min(100, (capped / playerDurationSec) * 100)}%` : "0%";
+  const ratio = playerDurationSec > 0 ? Math.min(100, (capped / playerDurationSec) * 100) : 0;
+  if (bar) bar.style.width = `${ratio}%`;
+  if (progressSlider && !progressEditing) {
+    progressSlider.max = String(Math.max(1, Math.round(playerDurationSec || 100)));
+    progressSlider.value = String(Math.round(capped));
+    progressSlider.style.setProperty("--value", `${ratio}%`);
+  }
+}
+
+function updateProgress() {
+  if (progressEditing) return;
+  setProgressUI(currentProgressSeconds());
 }
 
 function providerLabel(provider) {
@@ -583,6 +596,49 @@ qs("#refresh-player-button").addEventListener("click", async () => {
     actionResult.textContent = `失败：${error.message}`;
   }
 });
+
+async function commitSeek(value) {
+  if (!playerDurationSec) {
+    actionResult.textContent = "当前歌曲还没有可用时长，暂时不能拖动进度。";
+    return;
+  }
+  const position = Math.max(0, Math.min(Number(value) || 0, playerDurationSec));
+  const body = new FormData();
+  body.set("position", String(position));
+  playerPositionSec = position;
+  playerStartedAtMs = Date.now() - position * 1000;
+  latestPlayerStatus = 1;
+  setPlayerButtonState(latestPlayerStatus);
+  setProgressUI(position);
+  await runAction(`正在跳转到 ${formatTime(position)}...`, "/api/seek", body);
+  playerActionHoldUntil = Date.now() + 3500;
+  await refreshPlayer({ silent: false });
+}
+
+if (progressSlider) {
+  progressSlider.addEventListener("pointerdown", () => {
+    progressEditing = true;
+  });
+  progressSlider.addEventListener("input", () => {
+    const value = Number(progressSlider.value) || 0;
+    const ratio = playerDurationSec > 0 ? Math.min(100, (value / playerDurationSec) * 100) : 0;
+    progressSlider.style.setProperty("--value", `${ratio}%`);
+    const bar = qs("#player-progress");
+    if (bar) bar.style.width = `${ratio}%`;
+    setText("#player-elapsed", formatTime(value));
+  });
+  progressSlider.addEventListener("pointerup", async () => {
+    lastProgressPointerUp = Date.now();
+    const value = progressSlider.value;
+    progressEditing = false;
+    await commitSeek(value);
+  });
+  progressSlider.addEventListener("change", async () => {
+    if (Date.now() - lastProgressPointerUp < 600) return;
+    progressEditing = false;
+    await commitSeek(progressSlider.value);
+  });
+}
 
 qs("#clear-events-button").addEventListener("click", async () => {
   try {

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import requests
 import xiaomusic.xiaomusic as xm_module
@@ -48,6 +48,7 @@ class RuntimeState:
     last_duration: float = 0.0
     last_position: float = 0.0
     last_used_url: str = ""
+    last_seek_base_url: str = ""
     playback_paused: bool = False
     startup_error: str = ""
     discovered_devices: list[dict] = field(default_factory=list)
@@ -517,6 +518,7 @@ class CocoXiaoMusicService:
         status = target.get("status", {})
         volume = status.get("volume")
         self.state.last_used_url = target.get("used_url") or local_url or url
+        self.state.last_seek_base_url = self.state.last_used_url
         self.state.playback_paused = False
         self._log("ok", f"已推送并确认音箱进入播放态（did={did}，音量={volume}）", keyword=keyword, song=song.raw)
         return {"success": True, "song": song.raw, "url": url, "targets": results}
@@ -707,6 +709,56 @@ class CocoXiaoMusicService:
         base = self.settings.hostname.rstrip("/")
         return f"{base}:{self.settings.admin_port}/media/{quote(relative)}"
 
+    def _media_path_from_url(self, url: str) -> Path | None:
+        parsed = urlparse(url or "")
+        prefix = "/media/"
+        if not parsed.path.startswith(prefix):
+            return None
+        media_root = Path("music/tmp").resolve()
+        try:
+            path = (media_root / Path(unquote(parsed.path[len(prefix):]))).resolve()
+            path.relative_to(media_root)
+        except ValueError:
+            return None
+        return path if path.exists() else None
+
+    def _make_seek_audio(self, seconds: float) -> str:
+        source = self._media_path_from_url(self.state.last_seek_base_url or self.state.last_used_url)
+        if not source:
+            raise RuntimeError("current stream does not support seeking")
+        duration = max(0.0, self.state.last_duration)
+        offset = max(0.0, float(seconds))
+        if duration > 0:
+            offset = min(offset, max(0.0, duration - 1))
+        cache_key = hashlib.sha1(f"{source}:{source.stat().st_mtime}:{offset:.1f}".encode("utf-8")).hexdigest()[:20]
+        safe_stem = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", source.stem)[:42] or "seek"
+        target = Path("music/tmp") / f"coco-seek-{cache_key}-{safe_stem}.mp3"
+        if not target.exists() or target.stat().st_size < 4096:
+            subprocess.run(
+                [
+                    self._find_ffmpeg(),
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{offset:.3f}",
+                    "-i",
+                    str(source),
+                    "-vn",
+                    "-codec:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "128k",
+                    str(target),
+                ],
+                check=True,
+                capture_output=True,
+            )
+        if target.stat().st_size < 4096:
+            raise RuntimeError("seek audio is too small")
+        return self._media_url_for(target)
+
     async def _take_over_device(self, did: str):
         if not self.xiaomusic:
             return None
@@ -894,6 +946,7 @@ class CocoXiaoMusicService:
         self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         first_success = next((item for item in results if item.get("success")), {})
         self.state.last_used_url = first_success.get("used_url", "")
+        self.state.last_seek_base_url = self.state.last_used_url
         self.state.playback_paused = False
         self._log("ok", f"前端手动推送：{title} - {artist} [{provider}]", song=song.raw)
         return {"success": True, "song": song.raw, "url": url, "targets": results}
@@ -906,6 +959,10 @@ class CocoXiaoMusicService:
         for did in targets:
             device = await self._take_over_device(did)
             results.append({"did": did, "success": bool(device)})
+        if any(item["success"] for item in results):
+            self.state.last_position = self._current_position_seconds()
+            self.state.playback_paused = True
+            self._log("ok", "已停止当前推流")
         return {"success": any(item["success"] for item in results), "targets": results}
 
     async def pause_playback(self, target_dids: list[str] | None = None):
@@ -913,6 +970,7 @@ class CocoXiaoMusicService:
             return {"success": False, "error": "xiaomusic not ready"}
         targets = self._manual_targets(target_dids)
         results = []
+        paused_at = self._current_position_seconds()
         for did in targets:
             device = self.xiaomusic.device_manager.devices.get(did)
             if not device:
@@ -923,11 +981,16 @@ class CocoXiaoMusicService:
                 ret = []
                 for device_id in device_ids:
                     ret.append(await device.auth_manager.mina_service.player_pause(device_id))
-                results.append({"did": did, "success": True, "ret": ret})
+                status = await self._poll_player_status(did, max_tries=2)
+                if status.get("status") == 1:
+                    for device_id in device_ids:
+                        ret.append(await device.auth_manager.mina_service.player_stop(device_id))
+                    status = await self._poll_player_status(did, max_tries=2)
+                results.append({"did": did, "success": True, "ret": ret, "status": status})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
         if any(item["success"] for item in results):
-            self.state.last_position = self._current_position_seconds()
+            self.state.last_position = paused_at
             self.state.playback_paused = True
             self._log("ok", "已暂停当前推流")
         return {"success": any(item["success"] for item in results), "targets": results}
@@ -950,6 +1013,16 @@ class CocoXiaoMusicService:
                 for device_id in device_ids:
                     ret.append(await device.auth_manager.mina_service.player_play(device_id))
                 status = await self._poll_player_status(did, max_tries=3)
+                if status.get("status") != 1:
+                    replay_url = self.state.last_used_url
+                    if self.state.last_position > 1:
+                        try:
+                            replay_url = await asyncio.get_running_loop().run_in_executor(None, self._make_seek_audio, self.state.last_position)
+                        except Exception as exc:
+                            self._log("warn", f"续播切片失败，回退原始链接：{exc!r}")
+                    ret.append(await self.xiaomusic.play_url(did, replay_url))
+                    self.state.last_used_url = replay_url
+                    status = await self._poll_player_status(did, max_tries=3)
                 results.append({"did": did, "success": status.get("status") == 1, "ret": ret, "status": status})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
@@ -958,6 +1031,32 @@ class CocoXiaoMusicService:
             self.state.playback_paused = False
             self.state.last_playback_at = (datetime.now() - timedelta(seconds=resumed_from)).strftime("%Y-%m-%d %H:%M:%S")
             self._log("ok", "已继续播放上一次推流")
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def seek_playback(self, position: float, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        targets = self._manual_targets(target_dids)
+        try:
+            seek_url = await asyncio.get_running_loop().run_in_executor(None, self._make_seek_audio, position)
+        except Exception as exc:
+            self.state.last_error = repr(exc)
+            self._log("error", f"进度跳转失败：{exc!r}")
+            return {"success": False, "error": repr(exc)}
+        results = []
+        for did in targets:
+            try:
+                ret = await self.xiaomusic.play_url(did, seek_url)
+                status = await self._poll_player_status(did, max_tries=3)
+                results.append({"did": did, "success": status.get("status") == 1, "ret": ret, "status": status})
+            except Exception as exc:
+                results.append({"did": did, "success": False, "error": repr(exc)})
+        if any(item["success"] for item in results):
+            self.state.last_position = max(0.0, float(position))
+            self.state.last_playback_at = (datetime.now() - timedelta(seconds=self.state.last_position)).strftime("%Y-%m-%d %H:%M:%S")
+            self.state.last_used_url = seek_url
+            self.state.playback_paused = False
+            self._log("ok", f"已跳转到 {self.state.last_position:.1f}s 继续播放")
         return {"success": any(item["success"] for item in results), "targets": results}
 
     async def set_volume(self, volume: int, target_dids: list[str] | None = None):
@@ -1093,6 +1192,7 @@ class CocoXiaoMusicService:
             "last_duration": self.state.last_duration,
             "last_position": self._current_position_seconds(),
             "last_used_url": self.state.last_used_url,
+            "last_seek_base_url": self.state.last_seek_base_url,
             "playback_paused": self.state.playback_paused,
             "selected_dids": list(self.settings.selected_dids),
             "manual_target_dids": list(self.settings.manual_target_dids),
