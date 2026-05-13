@@ -269,25 +269,20 @@ class CocoXiaoMusicService:
         search_task = asyncio.get_running_loop().run_in_executor(
             None, self.coco.search_first, keyword
         )
-        await asyncio.sleep(self.settings.official_answer_delay_sec)
         device = await self._take_over_device(did)
         if not device:
             self.state.last_error = "device not found"
             return {"success": False, "error": "device not found"}
-
-        await self._speak(device, self.settings.search_tts.format(keyword=keyword))
         try:
             song, url = await search_task
         except Exception as exc:
             self.state.last_error = str(exc)
             self._log("error", f"coco 请求失败：{exc!r}", keyword=keyword)
-            await self._speak(device, self.settings.error_tts)
             return {"success": False, "error": str(exc)}
 
         if not song:
             self.state.last_error = "not found"
             self._log("error", f"coco 没搜到：{keyword}", keyword=keyword)
-            await self._speak(device, self.settings.error_tts)
             return {"success": False, "error": "not found"}
         if not url:
             self.state.last_error = "first result has no url"
@@ -297,7 +292,6 @@ class CocoXiaoMusicService:
                 keyword=keyword,
                 song=song.raw,
             )
-            await self._speak(device, self.settings.error_tts)
             return {
                 "success": False,
                 "error": "first result has no url",
@@ -315,18 +309,34 @@ class CocoXiaoMusicService:
             keyword=keyword,
             song=song.raw,
         )
-        await self._speak(
-            device,
-            self.settings.found_tts.format(
-                title=song.title or keyword,
-                artist=song.artist or "歌手",
-                keyword=keyword,
-            ),
-        )
         await self._take_over_device(did)
-        await self.xiaomusic.play_url(did, url)
-        self._log("ok", "已推送到小爱音箱", keyword=keyword, song=song.raw)
-        return {"success": True, "song": song.raw, "url": url}
+        push_result = await self.xiaomusic.play_url(did, url)
+        await asyncio.sleep(2)
+        status = await self.xiaomusic.get_player_status(did=did)
+        is_playing = status.get("status") == 1
+        if not is_playing:
+            self.state.last_error = f"push accepted but player status={status!r}"
+            self._log(
+                "error",
+                f"推流已下发但音箱未进入播放态：{status!r}",
+                keyword=keyword,
+                song=song.raw,
+            )
+            return {
+                "success": False,
+                "song": song.raw,
+                "url": url,
+                "push_result": push_result,
+                "player_status": status,
+            }
+        self._log("ok", "已推送并确认音箱进入播放态", keyword=keyword, song=song.raw)
+        return {
+            "success": True,
+            "song": song.raw,
+            "url": url,
+            "push_result": push_result,
+            "player_status": status,
+        }
 
     async def _take_over_device(self, did: str):
         if not self.xiaomusic:

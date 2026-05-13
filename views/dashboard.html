@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">coco-xiaomusic</p>
         <h1>小爱音箱播放控制台</h1>
-        <p class="subtitle">语音命中“点歌”后，保留原始应答，再接入 coco 搜索和推流播放。</p>
+        <p class="subtitle">语音命中“点歌”后，立即静默接管，再接入 coco 搜索和推流播放。</p>
       </div>
       <div class="runtime" id="runtime-card">
         <span class="runtime-dot"></span>
@@ -164,7 +164,7 @@
             <input name="coco_base" id="runtime-coco-base" required>
           </label>
           <label>
-            <span>官方应答缓冲秒数</span>
+            <span>静默接管延迟秒数</span>
             <input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required>
           </label>
           <label>

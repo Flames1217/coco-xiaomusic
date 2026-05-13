@@ -32,7 +32,7 @@ class AppSettings:
     admin_host: str = "127.0.0.1"
     admin_port: int = 8088
     coco_base: str = "https://coco.viper3.top"
-    official_answer_delay_sec: float = 2.4
+    official_answer_delay_sec: float = 0.0
     search_tts: str = "小爱正在用coco搜索{keyword}"
     found_tts: str = "搜到啦，马上为你播放{artist}的{title}"
     error_tts: str = "coco暂时没有拿到可播放的第一条结果"
@@ -57,6 +57,9 @@ class AppSettings:
             data["coco_keywords"] = tuple(keywords)
         if tuple(data.get("coco_keywords", ())) == LEGACY_KEYWORDS:
             data["coco_keywords"] = DEFAULT_KEYWORDS
+            repaired = True
+        if float(data.get("official_answer_delay_sec", 0.0) or 0.0) != 0.0:
+            data["official_answer_delay_sec"] = 0.0
             repaired = True
         for key in ("selected_dids", "manual_target_dids"):
             if isinstance(data.get(key), list):
