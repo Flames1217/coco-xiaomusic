@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/
+conf/
+music/
+xiaomusic.log.txt
+.DS_Store

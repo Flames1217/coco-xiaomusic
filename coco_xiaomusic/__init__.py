@@ -1,0 +1,1 @@
+"""coco-xiaomusic application package."""

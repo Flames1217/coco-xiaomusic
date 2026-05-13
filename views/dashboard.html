@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>coco-xiaomusic 控制台</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <main class="workspace">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">coco-xiaomusic</p>
+        <h1>小爱音箱播放控制台</h1>
+        <p class="subtitle">语音命中 coco 后，保留原始应答，再接入 coco 搜索和推流播放。</p>
+      </div>
+      <div class="runtime" id="runtime-card">
+        <span class="runtime-dot"></span>
+        <div>
+          <strong id="runtime-title">启动中</strong>
+          <span id="runtime-copy">正在连接小爱与 coco</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="summary-grid">
+      <article class="metric">
+        <span>语音监听设备</span>
+        <strong id="device-id">--</strong>
+      </article>
+      <article class="metric">
+        <span>coco 服务</span>
+        <strong id="coco-base">--</strong>
+      </article>
+      <article class="metric">
+        <span>最近口令</span>
+        <strong id="last-keyword">暂无</strong>
+      </article>
+      <article class="metric">
+        <span>最近播放</span>
+        <strong id="last-playback">暂无</strong>
+      </article>
+    </section>
+
+    <section class="surface onboarding">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">First Run</p>
+          <h2>从 0 到可播放</h2>
+        </div>
+      </div>
+      <div class="steps">
+        <article class="step" id="step-account">
+          <span>1</span>
+          <div>
+            <strong>配置小米账号</strong>
+            <p id="step-account-copy">等待检查</p>
+          </div>
+        </article>
+        <article class="step" id="step-token">
+          <span>2</span>
+          <div>
+            <strong>登录并生成 token</strong>
+            <p id="step-token-copy">首次启动会自动触发 xiaomusic 登录流程</p>
+          </div>
+        </article>
+        <article class="step" id="step-device">
+          <span>3</span>
+          <div>
+            <strong>识别目标音箱</strong>
+            <p id="step-device-copy">等待设备列表</p>
+          </div>
+        </article>
+        <article class="step" id="step-ready">
+          <span>4</span>
+          <div>
+            <strong>开始语音和后台推送</strong>
+            <p id="step-ready-copy">等待服务就绪</p>
+          </div>
+        </article>
+      </div>
+      <form id="account-form" class="setup-form">
+        <label>
+          <span>小米账号</span>
+          <input name="account" placeholder="手机号或账号" autocomplete="username" required>
+        </label>
+        <label>
+          <span>小米密码</span>
+          <input name="password" type="password" placeholder="输入密码" autocomplete="current-password" required>
+        </label>
+        <label>
+          <span>本机访问地址</span>
+          <input name="hostname" value="http://192.168.1.13" required>
+        </label>
+        <button type="submit">保存账号并开始登录</button>
+      </form>
+      <div id="account-locked" class="account-locked hidden">
+        <div>
+          <strong>账号已保存</strong>
+          <p>为了避免误改，登录配置已锁定。</p>
+        </div>
+        <button type="button" id="edit-account-button" class="ghost">编辑账号</button>
+      </div>
+      <div class="device-toolbar">
+        <div>
+          <strong>设备接入</strong>
+          <p>可勾选多台设备参与语音监听，并单独指定后台默认推送目标。</p>
+        </div>
+        <button type="button" id="save-devices-button">保存设备方案</button>
+      </div>
+      <div class="device-list" id="device-list"></div>
+    </section>
+
+    <section class="content-grid">
+      <article class="surface controls">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Playback</p>
+            <h2>手动推送播放</h2>
+          </div>
+          <button class="ghost" id="stop-button" type="button">停止播放</button>
+        </div>
+
+        <form id="play-form" class="play-form">
+          <label>
+            <span>歌曲关键词</span>
+            <input id="keyword" name="keyword" placeholder="例如：关键词" autocomplete="off" required>
+          </label>
+          <button type="submit">语音策略测试：播第一条</button>
+        </form>
+
+        <div class="preview" id="preview">
+          <span class="label">搜索预览</span>
+          <strong id="preview-title">输入关键词后搜索 coco 全部结果</strong>
+          <p id="preview-copy">前端可手动选择任意一条推送，语音口令仍默认第一条。</p>
+          <button class="ghost compact" id="preview-button" type="button">搜索全部结果</button>
+          <div class="preview-list" id="preview-list"></div>
+        </div>
+
+        <pre id="action-result">等待操作...</pre>
+      </article>
+
+      <article class="surface settings">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Voice Flow</p>
+            <h2>当前语音策略</h2>
+          </div>
+        </div>
+        <dl class="settings-list">
+          <div><dt>官方应答缓冲</dt><dd id="delay-sec">--</dd></div>
+          <div><dt>搜索提示</dt><dd id="search-tts">--</dd></div>
+          <div><dt>命中提示</dt><dd id="found-tts">--</dd></div>
+          <div><dt>触发关键词</dt><dd id="keywords">--</dd></div>
+        </dl>
+        <div class="command-row">
+          <span>可可 关键词</span>
+          <span>COCO关键词</span>
+          <span>coco 播放关键词</span>
+        </div>
+        <form id="runtime-form" class="runtime-form">
+          <label>
+            <span>coco 服务地址</span>
+            <input name="coco_base" id="runtime-coco-base" required>
+          </label>
+          <label>
+            <span>官方应答缓冲秒数</span>
+            <input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required>
+          </label>
+          <label>
+            <span>搜索提示话术</span>
+            <input name="search_tts" id="runtime-search-tts" required>
+          </label>
+          <label>
+            <span>命中提示话术</span>
+            <input name="found_tts" id="runtime-found-tts" required>
+          </label>
+          <label>
+            <span>失败提示话术</span>
+            <input name="error_tts" id="runtime-error-tts" required>
+          </label>
+          <button type="submit">保存播放策略</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="surface activity">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Activity</p>
+          <h2>运行事件</h2>
+        </div>
+      </div>
+      <div id="events" class="events"></div>
+    </section>
+  </main>
+
+  <script src="/assets/dashboard.js"></script>
+</body>
+</html>
