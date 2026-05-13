@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import xiaomusic.xiaomusic as xm_module
 from rich.console import Console
@@ -339,6 +340,8 @@ class CocoXiaoMusicService:
             keyword=keyword,
             song=song.raw,
         )
+        suffix = Path(urlparse(url).path).suffix.lower() or "无后缀"
+        self._log("info", f"准备推送音源格式：{suffix}", keyword=keyword, song=song.raw)
         await self._take_over_device(did)
         push_result = await self.xiaomusic.play_url(did, url)
         self._log("info", f"播放下发结果：{push_result!r}", keyword=keyword, song=song.raw)
