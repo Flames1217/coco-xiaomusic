@@ -9,6 +9,7 @@ from pathlib import Path
 
 import xiaomusic.xiaomusic as xm_module
 from rich.console import Console
+from xiaomusic.command_handler import CommandHandler
 from xiaomusic.config import Config
 from xiaomusic.xiaomusic import XiaoMusic
 
@@ -49,6 +50,7 @@ class CocoXiaoMusicService:
         self.xiaomusic: XiaoMusic | None = None
         self._runner_task: asyncio.Task | None = None
         self._patch_online_play()
+        self._patch_command_observer()
 
     def _log(self, level: str, message: str, keyword: str = "", song: dict | None = None):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -73,6 +75,26 @@ class CocoXiaoMusicService:
             return await self.play_keyword(did, arg1)
 
         xm_module.OnlineMusicService.online_play = coco_online_play
+
+    def _patch_command_observer(self):
+        if getattr(CommandHandler.do_check_cmd, "_coco_observed", False):
+            return
+
+        original_do_check_cmd = CommandHandler.do_check_cmd
+
+        async def observed_do_check_cmd(handler, did="", query="", ctrl_panel=True, **kwargs):
+            if not ctrl_panel:
+                self._log("info", f"收到语音问句：{query}", keyword=query)
+            return await original_do_check_cmd(
+                handler,
+                did=did,
+                query=query,
+                ctrl_panel=ctrl_panel,
+                **kwargs,
+            )
+
+        observed_do_check_cmd._coco_observed = True
+        CommandHandler.do_check_cmd = observed_do_check_cmd
 
     @staticmethod
     def _patch_xiaomusic_logger():
@@ -99,6 +121,7 @@ class CocoXiaoMusicService:
             hostname=self.settings.hostname,
             port=self.settings.xiaomusic_port,
             enable_pull_ask=True,
+            get_ask_by_mina=True,
             enable_force_stop=True,
             pull_ask_sec=1,
             edge_tts_voice=self.settings.edge_tts_voice,
