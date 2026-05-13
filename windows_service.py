@@ -46,6 +46,8 @@ class CocoXiaoMusicWindowsService(win32serviceutil.ServiceFramework):
             host=settings.admin_host,
             port=settings.admin_port,
             log_level="warning",
+            log_config=None,
+            access_log=False,
         )
         self._server = uvicorn.Server(config)
         self._server_thread = threading.Thread(
