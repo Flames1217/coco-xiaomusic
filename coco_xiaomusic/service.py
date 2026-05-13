@@ -502,10 +502,6 @@ class CocoXiaoMusicService:
         return {"success": False, "error": self.state.last_error}
 
     async def _play_song(self, did: str, keyword: str, song: CocoSong, url: str, local_url: str | None = None):
-        self.state.last_song = song.raw
-        self.state.last_duration = self._song_duration_seconds(song.raw or {})
-        self.state.last_position = 0.0
-        self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._log("ok", f"coco 第一条：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
 
         suffix = Path(urlparse(url).path).suffix.lower() or "无后缀"
@@ -521,6 +517,10 @@ class CocoXiaoMusicService:
 
         status = target.get("status", {})
         volume = status.get("volume")
+        self.state.last_song = song.raw
+        self.state.last_duration = self._song_duration_seconds(song.raw or {})
+        self.state.last_position = 0.0
+        self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.state.last_used_url = target.get("used_url") or local_url or url
         self.state.last_seek_base_url = url
         self.state.last_source_url = url

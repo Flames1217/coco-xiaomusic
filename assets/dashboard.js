@@ -123,6 +123,10 @@ function showBottomPlayer() {
   document.body.classList.add("player-visible");
 }
 
+function hideBottomPlayer() {
+  document.body.classList.remove("player-visible");
+}
+
 function currentProgressSeconds() {
   if (latestPlayerStatus === 1 && playerStartedAtMs) {
     return Math.max(0, (Date.now() - playerStartedAtMs) / 1000);
@@ -238,8 +242,8 @@ function renderAccountState(status) {
 
 function renderPlayerSummary(status) {
   const song = status.last_song || {};
-  const hasSong = Boolean(song.title || status.last_keyword);
-  const title = song.title || status.last_keyword || "暂无歌曲";
+  const hasPlayableStream = Boolean(status.last_used_url && status.last_playback_at);
+  const title = hasPlayableStream ? (song.title || "暂无歌曲") : "暂无歌曲";
   const artist = song.artist || "--";
   const duration = song.duration || song.interval || song.time || song.extra?.duration || status.last_duration;
   setText("#player-track", title);
@@ -263,7 +267,11 @@ function renderPlayerSummary(status) {
   }
   updateProgress();
   setPlayerCover(song.cover || song.extra?.cover || "", title, artist);
-  if (hasSong) showBottomPlayer();
+  if (hasPlayableStream) {
+    showBottomPlayer();
+  } else {
+    hideBottomPlayer();
+  }
 }
 
 function renderStatus(payload) {
