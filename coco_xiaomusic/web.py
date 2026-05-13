@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .service import CocoXiaoMusicService
@@ -49,6 +49,22 @@ async def api_clear_events():
 @app.get("/api/search-preview")
 async def api_search_preview(keyword: str):
     return await service.search_preview(keyword)
+
+
+@app.get("/stream/{token}.mp3")
+async def api_stream_audio(token: str):
+    if not service.has_stream_source(token):
+        raise HTTPException(status_code=404, detail="stream expired")
+    chunks = service.stream_audio_chunks(token)
+    return StreamingResponse(
+        chunks,
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": "inline; filename=coco.mp3",
+            "Cache-Control": "no-store",
+            "Accept-Ranges": "none",
+        },
+    )
 
 
 def _parse_csv(value: str) -> list[str]:
