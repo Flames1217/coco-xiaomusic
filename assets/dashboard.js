@@ -11,11 +11,13 @@ let playerActionHoldUntil = 0;
 let volumeTimer = null;
 let volumeEditing = false;
 let volumeHoldUntil = 0;
+let lastVolumePointerUp = 0;
 let previewItems = [];
 let selectedProvider = "all";
 let currentPlaybackAt = "";
 let playerStartedAtMs = 0;
 let playerDurationSec = 0;
+let playerPositionSec = 0;
 let lastCommittedVolume = null;
 
 function clampVolume(value) {
@@ -112,9 +114,21 @@ function parsePlaybackTime(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function showBottomPlayer() {
+  document.body.classList.add("player-visible");
+}
+
+function currentProgressSeconds() {
+  if (latestPlayerStatus === 1 && playerStartedAtMs) {
+    return Math.max(0, (Date.now() - playerStartedAtMs) / 1000);
+  }
+  return Math.max(0, playerPositionSec || 0);
+}
+
 function updateProgress() {
-  const elapsed = latestPlayerStatus === 1 && playerStartedAtMs ? Math.max(0, (Date.now() - playerStartedAtMs) / 1000) : 0;
+  const elapsed = currentProgressSeconds();
   const capped = playerDurationSec > 0 ? Math.min(elapsed, playerDurationSec) : elapsed;
+  playerPositionSec = capped;
   setText("#player-elapsed", formatTime(capped));
   setText("#player-duration", playerDurationSec > 0 ? formatTime(playerDurationSec) : "--:--");
   const bar = qs("#player-progress");
@@ -209,23 +223,32 @@ function renderAccountState(status) {
 
 function renderPlayerSummary(status) {
   const song = status.last_song || {};
+  const hasSong = Boolean(song.title || status.last_keyword);
   const title = song.title || status.last_keyword || "暂无歌曲";
   const artist = song.artist || "--";
   const duration = song.duration || song.interval || song.time || song.extra?.duration || status.last_duration;
   setText("#player-track", title);
-  setText("#player-artist", "");
-  setText("#player-meta", artist);
+  setText("#player-artist", artist);
+  setText("#player-meta", "");
   playerDurationSec = durationSeconds(duration);
+  playerPositionSec = Number(status.last_position || 0);
   if (status.last_playback_at && status.last_playback_at !== currentPlaybackAt) {
     currentPlaybackAt = status.last_playback_at;
-    playerStartedAtMs = parsePlaybackTime(status.last_playback_at) || Date.now();
+    playerStartedAtMs = latestPlayerStatus === 1
+      ? Date.now() - playerPositionSec * 1000
+      : parsePlaybackTime(status.last_playback_at) || Date.now();
   }
   if (!status.last_playback_at) {
     currentPlaybackAt = "";
     playerStartedAtMs = 0;
+    playerPositionSec = 0;
+  }
+  if (status.playback_paused) {
+    playerStartedAtMs = 0;
   }
   updateProgress();
   setPlayerCover(song.cover || song.extra?.cover || "", title, artist);
+  if (hasSong) showBottomPlayer();
 }
 
 function renderStatus(payload) {
@@ -305,6 +328,7 @@ function setPlayerButtonState(statusCode) {
   const button = qs("#pause-button");
   if (!button) return;
   const isPlaying = statusCode === 1;
+  document.body.classList.toggle("player-playing", isPlaying);
   button.textContent = isPlaying ? "Ⅱ" : "▶";
   button.title = isPlaying ? "暂停" : "播放";
   button.setAttribute("aria-label", button.title);
@@ -313,6 +337,7 @@ function setPlayerButtonState(statusCode) {
 function setLocalVolume(value) {
   const v = clampVolume(value);
   volumeSlider.value = String(v);
+  volumeSlider.style.setProperty("--value", `${v}%`);
   const input = getVolumeInput();
   if (input) input.value = String(v);
   lastCommittedVolume ??= v;
@@ -438,8 +463,10 @@ function renderPreviewItems(items) {
       body.set("artist", target.dataset.artist || "");
       body.set("cover", target.dataset.cover || "");
       await runAction("正在推送选中的歌曲...", "/api/play-selected", body);
+      showBottomPlayer();
       latestPlayerStatus = 1;
       playerStartedAtMs = Date.now();
+      playerPositionSec = 0;
       currentPlaybackAt = "";
       setPlayerButtonState(latestPlayerStatus);
       await refreshPlayer({ silent: false });
@@ -452,7 +479,7 @@ function renderPreviewItems(items) {
 function previewVolume(value) {
   const v = clampVolume(value);
   setLocalVolume(v);
-  volumeHoldUntil = Date.now() + 3500;
+  volumeHoldUntil = Date.now() + 5000;
   return v;
 }
 
@@ -466,19 +493,21 @@ async function commitVolume(value) {
     try {
       await getJson("/api/volume", { method: "POST", body });
       lastCommittedVolume = v;
-      volumeHoldUntil = Date.now() + 1200;
+      volumeHoldUntil = Date.now() + 5000;
     } catch (error) {
       actionResult.textContent = `音量设置失败：${error.message}`;
     }
-  }, 500);
+  }, 180);
 }
 
 qs("#play-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const result = await runAction("正在用 coco 第一条推送...", "/api/play", new FormData(event.currentTarget));
   if (result?.success) {
+    showBottomPlayer();
     latestPlayerStatus = 1;
     playerStartedAtMs = Date.now();
+    playerPositionSec = 0;
     currentPlaybackAt = "";
     setPlayerButtonState(latestPlayerStatus);
   }
@@ -532,16 +561,16 @@ qs("#stop-button").addEventListener("click", async () => {
 qs("#pause-button").addEventListener("click", async () => {
   const shouldPause = latestPlayerStatus === 1;
   const endpoint = shouldPause ? "/api/pause" : "/api/resume";
+  const currentPosition = currentProgressSeconds();
   latestPlayerStatus = shouldPause ? 2 : 1;
   playerActionHoldUntil = Date.now() + 3500;
-  if (!shouldPause) {
-    playerStartedAtMs = Date.now();
-    currentPlaybackAt = "";
-  }
+  playerPositionSec = currentPosition;
+  playerStartedAtMs = shouldPause ? 0 : Date.now() - currentPosition * 1000;
   setPlayerButtonState(latestPlayerStatus);
   await runAction(shouldPause ? "正在暂停..." : "正在继续...", endpoint, new FormData());
   latestPlayerStatus = shouldPause ? 2 : 1;
   playerActionHoldUntil = Date.now() + 3500;
+  playerStartedAtMs = shouldPause ? 0 : Date.now() - playerPositionSec * 1000;
   setPlayerButtonState(latestPlayerStatus);
   await refreshPlayer({ silent: false });
 });
@@ -569,11 +598,12 @@ volumeSlider.addEventListener("pointerdown", () => {
 });
 
 volumeSlider.addEventListener("pointerup", () => {
-  volumeHoldUntil = Date.now() + 2500;
+  lastVolumePointerUp = Date.now();
+  volumeHoldUntil = Date.now() + 5000;
   commitVolume(volumeSlider.value);
   setTimeout(() => {
     volumeEditing = false;
-  }, 900);
+  }, 1800);
 });
 
 volumeSlider.addEventListener("input", () => {
@@ -581,6 +611,7 @@ volumeSlider.addEventListener("input", () => {
 });
 
 volumeSlider.addEventListener("change", () => {
+  if (Date.now() - lastVolumePointerUp < 600) return;
   commitVolume(volumeSlider.value);
 });
 
@@ -590,12 +621,12 @@ if (volumeInput) {
     volumeEditing = true;
   });
   volumeInput.addEventListener("blur", () => {
-    volumeHoldUntil = Date.now() + 2500;
+    volumeHoldUntil = Date.now() + 5000;
     setLocalVolume(volumeInput.value);
     commitVolume(volumeInput.value);
     setTimeout(() => {
       volumeEditing = false;
-    }, 900);
+    }, 1800);
   });
   volumeInput.addEventListener("input", () => {
     previewVolume(volumeInput.value);

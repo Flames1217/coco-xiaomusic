@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>coco-xiaomusic 控制台</title>
-  <link rel="stylesheet" href="/assets/dashboard.css?v=20260513-r6">
+  <link rel="stylesheet" href="/assets/dashboard.css?v=20260514-r1">
 </head>
 <body>
   <main class="ops-shell">
@@ -73,43 +73,6 @@
           </div>
         </div>
 
-        <section class="music-player">
-          <div class="track-identity">
-            <div class="album-art" aria-hidden="true">
-              <img id="player-cover" alt="">
-              <span id="player-initial">CO</span>
-            </div>
-            <div>
-              <div class="track-title-line">
-                <strong id="player-track">暂无歌曲</strong>
-                <span id="player-artist">--</span>
-              </div>
-              <p id="player-meta"></p>
-            </div>
-          </div>
-          <div class="player-main">
-            <div class="player-actions" aria-label="播放器控制">
-              <button type="button" id="refresh-player-button" class="icon-button" title="刷新状态">↻</button>
-              <button type="button" id="pause-button" class="play-button" title="播放">▶</button>
-              <button class="icon-button danger" id="stop-button" type="button" title="停止">■</button>
-            </div>
-            <div class="progress-row">
-              <span id="player-elapsed">--:--</span>
-              <div class="progress-track"><span id="player-progress"></span></div>
-              <span id="player-duration">--:--</span>
-            </div>
-          </div>
-          <div class="volume-zone">
-            <span class="play-state" id="player-state"></span>
-            <label class="volume-control">
-              <span id="player-volume">音量 --</span>
-              <input id="volume-slider" type="range" min="0" max="100" value="8">
-              <input id="volume-input" type="number" min="0" max="100" step="1" value="8" aria-label="音量">
-            </label>
-            <span id="player-did">DID --</span>
-          </div>
-        </section>
-
         <form id="play-form" class="search-form">
           <label><span>歌曲关键词</span><input id="keyword" name="keyword" placeholder="例如：七朵组合的咏春" autocomplete="off" required></label>
           <button type="submit">播放第一条</button>
@@ -172,6 +135,44 @@
     </section>
   </main>
 
-  <script src="/assets/dashboard.js?v=20260513-r6"></script>
+  <aside class="bottom-player" id="bottom-player" aria-label="音乐播放栏">
+    <div class="bottom-track">
+      <div class="album-art" aria-hidden="true">
+        <img id="player-cover" alt="">
+        <span id="player-initial">CO</span>
+      </div>
+      <div class="bottom-track-text">
+        <strong id="player-track">暂无歌曲</strong>
+        <span id="player-artist">--</span>
+      </div>
+    </div>
+    <div class="bottom-controls">
+      <div class="player-actions" aria-label="播放器控制">
+        <button type="button" id="prev-button" class="icon-button" title="上一首" aria-label="上一首">‹</button>
+        <button type="button" id="pause-button" class="play-button" title="播放" aria-label="播放">▶</button>
+        <button type="button" id="next-button" class="icon-button" title="下一首" aria-label="下一首">›</button>
+        <button type="button" id="refresh-player-button" class="icon-button" title="刷新状态" aria-label="刷新状态">↻</button>
+        <button class="icon-button danger" id="stop-button" type="button" title="停止" aria-label="停止">■</button>
+      </div>
+      <div class="progress-row">
+        <span id="player-elapsed">0:00</span>
+        <div class="progress-track"><span id="player-progress"></span></div>
+        <span id="player-duration">--:--</span>
+      </div>
+    </div>
+    <label class="volume-control" aria-label="音量">
+      <span class="volume-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 9.5a4 4 0 0 1 0 5"></path></svg>
+      </span>
+      <input id="volume-slider" type="range" min="0" max="100" value="8">
+      <input id="volume-input" type="number" min="0" max="100" step="1" value="8" aria-label="音量数值">
+    </label>
+    <span class="sr-only" id="player-volume">音量 --</span>
+    <span class="sr-only" id="player-did">DID --</span>
+    <span class="sr-only" id="player-state"></span>
+    <span class="sr-only" id="player-meta"></span>
+  </aside>
+
+  <script src="/assets/dashboard.js?v=20260514-r1"></script>
 </body>
 </html>

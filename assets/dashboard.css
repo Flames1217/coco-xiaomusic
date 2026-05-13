@@ -954,3 +954,243 @@ pre {
     justify-content: flex-start;
   }
 }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.player-visible {
+  padding-bottom: 104px;
+}
+
+.bottom-player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  height: 92px;
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) minmax(420px, 1fr) minmax(210px, 300px);
+  align-items: center;
+  gap: 28px;
+  padding: 14px max(28px, calc((100vw - 1120px) / 2));
+  color: #333;
+  background: #fff;
+  border-top: 1px solid #e0e0e0;
+  box-shadow: 0 -10px 30px rgba(15, 23, 42, 0.08);
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+
+body.player-visible .bottom-player {
+  transform: translateY(0);
+}
+
+.bottom-track {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.bottom-player .album-art {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  box-shadow: none;
+  background: #edf3f8;
+  color: #1296db;
+}
+
+body.player-playing .bottom-player .album-art {
+  animation: spin 10s linear infinite;
+}
+
+.bottom-track-text {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.bottom-track-text strong,
+.bottom-track-text span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bottom-track-text strong {
+  color: #333;
+  font-size: 15px;
+}
+
+.bottom-track-text span {
+  color: #999;
+  font-size: 12px;
+}
+
+.bottom-player #player-artist {
+  display: block;
+}
+
+.bottom-controls {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.bottom-player .player-actions {
+  gap: 22px;
+}
+
+.bottom-player .icon-button,
+.bottom-player .play-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.bottom-player .icon-button {
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  height: 24px;
+  color: #9aa7b5;
+  background: transparent;
+  font-size: 24px;
+}
+
+.bottom-player .icon-button:hover {
+  color: #333;
+  background: transparent;
+}
+
+.bottom-player .play-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  background: #1296db;
+  color: #fff;
+  font-size: 20px;
+  box-shadow: 0 8px 18px rgba(18, 150, 219, 0.28);
+}
+
+.bottom-player .icon-button.danger {
+  color: #b5bec8;
+  font-size: 18px;
+}
+
+.bottom-player .progress-row {
+  width: min(520px, 100%);
+  grid-template-columns: 48px minmax(160px, 1fr) 48px;
+  color: #8b99aa;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bottom-player .progress-track {
+  height: 4px;
+  background: #e0e0e0;
+}
+
+.bottom-player .progress-track span {
+  background: #1296db;
+  transition: width 0.2s linear;
+}
+
+.bottom-player .volume-control {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px minmax(96px, 1fr) 56px;
+  align-items: center;
+  gap: 10px;
+}
+
+.volume-icon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: #999;
+}
+
+.volume-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#volume-slider {
+  width: 100%;
+  height: 4px;
+  min-height: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  appearance: none;
+  background: linear-gradient(to right, #1296db 0 var(--value, 8%), #e0e0e0 var(--value, 8%) 100%);
+}
+
+#volume-slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  appearance: none;
+  background: #1296db;
+  border: 0;
+  cursor: pointer;
+}
+
+#volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #1296db;
+  border: 0;
+  cursor: pointer;
+}
+
+.bottom-player #volume-input {
+  width: 56px;
+  min-height: 30px;
+  color: #333;
+  border-color: #d6dde6;
+  border-radius: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  body.player-visible {
+    padding-bottom: 184px;
+  }
+
+  .bottom-player {
+    height: 174px;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px 18px;
+  }
+
+  .bottom-player .progress-row {
+    width: 100%;
+  }
+}

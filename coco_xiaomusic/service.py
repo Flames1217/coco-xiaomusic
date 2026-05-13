@@ -8,7 +8,7 @@ import subprocess
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -46,6 +46,7 @@ class RuntimeState:
     last_error: str = ""
     last_playback_at: str = ""
     last_duration: float = 0.0
+    last_position: float = 0.0
     last_used_url: str = ""
     playback_paused: bool = False
     startup_error: str = ""
@@ -62,6 +63,7 @@ class CocoXiaoMusicService:
         self._runner_task: asyncio.Task | None = None
         self._mina_watch_task: asyncio.Task | None = None
         self._last_mina_timestamp: dict[str, int] = {}
+        self._recent_voice_commands: dict[tuple[str, str], float] = {}
         self._patch_online_play()
         self._patch_command_observer()
 
@@ -120,15 +122,23 @@ class CocoXiaoMusicService:
         original_do_check_cmd = CommandHandler.do_check_cmd
 
         async def observed_do_check_cmd(handler, did="", query="", ctrl_panel=True, **kwargs):
+            cleaned = str(query or "").strip()
             if not ctrl_panel:
-                self._log("info", f"收到语音问句：{query}", keyword=query)
-            return await original_do_check_cmd(
-                handler,
-                did=did,
-                query=query,
-                ctrl_panel=ctrl_panel,
-                **kwargs,
-            )
+                self._log("info", f"收到语音问句：{cleaned}", keyword=cleaned)
+            if cleaned and self._is_coco_command(cleaned):
+                keyword = self._extract_coco_keyword(cleaned)
+                if not keyword:
+                    return
+                dedupe_key = (str(did or ""), cleaned)
+                now = time.monotonic()
+                if now - self._recent_voice_commands.get(dedupe_key, 0) < 6:
+                    self._log("info", f"重复语音事件已忽略：{cleaned}", keyword=cleaned)
+                    return
+                self._recent_voice_commands[dedupe_key] = now
+                self._log("info", f"关键词命中，跳过官方处理链路：{cleaned}", keyword=cleaned)
+                await self.play_keyword(did, keyword)
+                return
+            return await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
 
         observed_do_check_cmd._coco_observed = True
         CommandHandler.do_check_cmd = observed_do_check_cmd
@@ -146,6 +156,19 @@ class CocoXiaoMusicService:
     @staticmethod
     def _clean_keyword(arg: str) -> str:
         return re.sub(r"^(播放歌曲|播放|放|来一首|点歌|点一首|搜索)\s*", "", arg.strip())
+
+    def _is_coco_command(self, query: str) -> bool:
+        text = query.strip()
+        lowered = text.lower()
+        return any(keyword.lower() in lowered for keyword in self.settings.coco_keywords if keyword)
+
+    def _extract_coco_keyword(self, query: str) -> str:
+        text = query.strip()
+        for keyword in sorted((item for item in self.settings.coco_keywords if item), key=len, reverse=True):
+            index = text.lower().find(keyword.lower())
+            if index >= 0:
+                return self._clean_keyword(text[index + len(keyword):].strip())
+        return self._clean_keyword(text)
 
     @staticmethod
     def _split_query(keyword: str) -> tuple[str, str]:
@@ -401,7 +424,7 @@ class CocoXiaoMusicService:
                         self._last_mina_timestamp[did] = max(self._last_mina_timestamp.get(did, 0), timestamp)
                         self._log("info", f"Mina 捕获语音：{query}", keyword=query)
                         await self.xiaomusic.do_check_cmd(did=did, query=query, ctrl_panel=False)
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.2)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -477,6 +500,7 @@ class CocoXiaoMusicService:
     async def _play_song(self, did: str, keyword: str, song: CocoSong, url: str, local_url: str | None = None):
         self.state.last_song = song.raw
         self.state.last_duration = self._song_duration_seconds(song.raw or {})
+        self.state.last_position = 0.0
         self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._log("ok", f"coco 第一条：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
 
@@ -628,6 +652,20 @@ class CocoXiaoMusicService:
             return seconds / 1000 if seconds > 10000 else seconds
         except ValueError:
             return 0.0
+
+    def _current_position_seconds(self) -> float:
+        if self.state.playback_paused:
+            return max(0.0, self.state.last_position)
+        if not self.state.last_playback_at:
+            return 0.0
+        try:
+            started = datetime.strptime(self.state.last_playback_at, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return max(0.0, self.state.last_position)
+        elapsed = max(0.0, (datetime.now() - started).total_seconds())
+        if self.state.last_duration > 0:
+            elapsed = min(elapsed, self.state.last_duration)
+        return elapsed
 
     def _probe_duration(self, filepath: Path) -> float:
         try:
@@ -852,6 +890,7 @@ class CocoXiaoMusicService:
             return {"success": False, "error": "all target devices failed", "targets": results}
         self.state.last_song = song.raw
         self.state.last_duration = self._song_duration_seconds(song.raw or {})
+        self.state.last_position = 0.0
         self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         first_success = next((item for item in results if item.get("success")), {})
         self.state.last_used_url = first_success.get("used_url", "")
@@ -880,11 +919,15 @@ class CocoXiaoMusicService:
                 results.append({"did": did, "success": False, "error": "device not found"})
                 continue
             try:
-                ret = await device.group_force_stop_xiaoai()
+                device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+                ret = []
+                for device_id in device_ids:
+                    ret.append(await device.auth_manager.mina_service.player_pause(device_id))
                 results.append({"did": did, "success": True, "ret": ret})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
         if any(item["success"] for item in results):
+            self.state.last_position = self._current_position_seconds()
             self.state.playback_paused = True
             self._log("ok", "已暂停当前推流")
         return {"success": any(item["success"] for item in results), "targets": results}
@@ -902,14 +945,18 @@ class CocoXiaoMusicService:
                 results.append({"did": did, "success": False, "error": "device not found"})
                 continue
             try:
-                ret = await self.xiaomusic.play_url(did, self.state.last_used_url)
+                device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+                ret = []
+                for device_id in device_ids:
+                    ret.append(await device.auth_manager.mina_service.player_play(device_id))
                 status = await self._poll_player_status(did, max_tries=3)
                 results.append({"did": did, "success": status.get("status") == 1, "ret": ret, "status": status})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
         if any(item["success"] for item in results):
+            resumed_from = max(0.0, self.state.last_position)
             self.state.playback_paused = False
-            self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.state.last_playback_at = (datetime.now() - timedelta(seconds=resumed_from)).strftime("%Y-%m-%d %H:%M:%S")
             self._log("ok", "已继续播放上一次推流")
         return {"success": any(item["success"] for item in results), "targets": results}
 
@@ -1044,6 +1091,7 @@ class CocoXiaoMusicService:
             "last_error": self.state.last_error,
             "last_playback_at": self.state.last_playback_at,
             "last_duration": self.state.last_duration,
+            "last_position": self._current_position_seconds(),
             "last_used_url": self.state.last_used_url,
             "playback_paused": self.state.playback_paused,
             "selected_dids": list(self.settings.selected_dids),
