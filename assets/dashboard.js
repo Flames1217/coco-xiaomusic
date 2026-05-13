@@ -9,6 +9,8 @@ let latestStatus = null;
 let latestPlayerStatus = 0;
 let lastPlayerStatusAt = 0;
 let playerActionHoldUntil = 0;
+let playerToggleInFlight = false;
+let queuedPlayerState = null;
 let volumeTimer = null;
 let volumeEditing = false;
 let volumeHoldUntil = 0;
@@ -397,6 +399,45 @@ async function runAction(message, url, body) {
   }
 }
 
+async function runPlayerAction(message, url, body = new FormData()) {
+  actionResult.textContent = message;
+  try {
+    const data = await getJson(url, { method: "POST", body });
+    actionResult.textContent = JSON.stringify(data, null, 2);
+    return data;
+  } catch (error) {
+    actionResult.textContent = `失败：${error.message}`;
+    throw error;
+  }
+}
+
+function applyPlayerIntent(playing) {
+  const position = currentProgressSeconds();
+  latestPlayerStatus = playing ? 1 : 2;
+  playerPositionSec = position;
+  playerStartedAtMs = playing ? Date.now() - position * 1000 : 0;
+  playerActionHoldUntil = Date.now() + 4500;
+  setPlayerButtonState(latestPlayerStatus);
+  setProgressUI(position);
+}
+
+async function flushPlayerToggleQueue() {
+  if (playerToggleInFlight) return;
+  playerToggleInFlight = true;
+  try {
+    while (queuedPlayerState !== null) {
+      const targetPlaying = queuedPlayerState;
+      queuedPlayerState = null;
+      const endpoint = targetPlaying ? "/api/resume" : "/api/pause";
+      await runPlayerAction(targetPlaying ? "正在继续..." : "正在暂停...", endpoint);
+      playerActionHoldUntil = Date.now() + 4500;
+    }
+  } finally {
+    playerToggleInFlight = false;
+    setTimeout(() => refreshPlayer({ silent: true }).catch(() => {}), 450);
+  }
+}
+
 function renderProviderFilter(items) {
   const node = qs("#provider-filter");
   if (!node) return;
@@ -571,21 +612,14 @@ qs("#stop-button").addEventListener("click", async () => {
   await refreshPlayer({ silent: false });
 });
 
-qs("#pause-button").addEventListener("click", async () => {
-  const shouldPause = latestPlayerStatus === 1;
-  const endpoint = shouldPause ? "/api/pause" : "/api/resume";
-  const currentPosition = currentProgressSeconds();
-  latestPlayerStatus = shouldPause ? 2 : 1;
-  playerActionHoldUntil = Date.now() + 3500;
-  playerPositionSec = currentPosition;
-  playerStartedAtMs = shouldPause ? 0 : Date.now() - currentPosition * 1000;
-  setPlayerButtonState(latestPlayerStatus);
-  await runAction(shouldPause ? "正在暂停..." : "正在继续...", endpoint, new FormData());
-  latestPlayerStatus = shouldPause ? 2 : 1;
-  playerActionHoldUntil = Date.now() + 3500;
-  playerStartedAtMs = shouldPause ? 0 : Date.now() - playerPositionSec * 1000;
-  setPlayerButtonState(latestPlayerStatus);
-  await refreshPlayer({ silent: false });
+qs("#pause-button").addEventListener("click", () => {
+  const targetPlaying = latestPlayerStatus !== 1;
+  queuedPlayerState = targetPlaying;
+  applyPlayerIntent(targetPlaying);
+  flushPlayerToggleQueue().catch((error) => {
+    actionResult.textContent = `播放器操作失败：${error.message}`;
+    refreshPlayer({ silent: false }).catch(() => {});
+  });
 });
 
 qs("#refresh-player-button").addEventListener("click", async () => {

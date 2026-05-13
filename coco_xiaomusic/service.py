@@ -65,6 +65,7 @@ class CocoXiaoMusicService:
         self._mina_watch_task: asyncio.Task | None = None
         self._last_mina_timestamp: dict[str, int] = {}
         self._recent_voice_commands: dict[tuple[str, str], float] = {}
+        self._pause_verify_tasks: dict[str, asyncio.Task] = {}
         self._patch_online_play()
         self._patch_command_observer()
 
@@ -891,6 +892,33 @@ class CocoXiaoMusicService:
                 await asyncio.sleep(1.0)
         return status
 
+    def _cancel_pause_verify(self, did: str):
+        task = self._pause_verify_tasks.pop(did, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _verify_pause_or_stop(self, did: str, paused_at: float, delay: float = 0.8):
+        try:
+            await asyncio.sleep(delay)
+            if not self.state.playback_paused:
+                return
+            device = self.xiaomusic.device_manager.devices.get(did) if self.xiaomusic else None
+            if not device:
+                return
+            status = await self._poll_player_status(did, max_tries=1)
+            if status.get("status") != 1 or not self.state.playback_paused:
+                return
+            device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+            for device_id in device_ids:
+                await device.auth_manager.mina_service.player_stop(device_id)
+            if self.state.playback_paused:
+                self.state.last_position = paused_at
+                self._log("info", "设备未响应 pause，已后台静默 stop 并保留进度")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("warn", f"后台暂停确认失败：{exc!r}")
+
     @staticmethod
     def _extract_code(push_ret):
         if isinstance(push_ret, dict):
@@ -972,6 +1000,7 @@ class CocoXiaoMusicService:
         results = []
         paused_at = self._current_position_seconds()
         for did in targets:
+            self._cancel_pause_verify(did)
             device = self.xiaomusic.device_manager.devices.get(did)
             if not device:
                 results.append({"did": did, "success": False, "error": "device not found"})
@@ -981,17 +1010,15 @@ class CocoXiaoMusicService:
                 ret = []
                 for device_id in device_ids:
                     ret.append(await device.auth_manager.mina_service.player_pause(device_id))
-                status = await self._poll_player_status(did, max_tries=2)
-                if status.get("status") == 1:
-                    for device_id in device_ids:
-                        ret.append(await device.auth_manager.mina_service.player_stop(device_id))
-                    status = await self._poll_player_status(did, max_tries=2)
-                results.append({"did": did, "success": True, "ret": ret, "status": status})
+                results.append({"did": did, "success": True, "ret": ret})
             except Exception as exc:
                 results.append({"did": did, "success": False, "error": repr(exc)})
         if any(item["success"] for item in results):
             self.state.last_position = paused_at
             self.state.playback_paused = True
+            for item in results:
+                if item.get("success") and item.get("did"):
+                    self._pause_verify_tasks[item["did"]] = asyncio.create_task(self._verify_pause_or_stop(item["did"], paused_at))
             self._log("ok", "已暂停当前推流")
         return {"success": any(item["success"] for item in results), "targets": results}
 
@@ -1003,6 +1030,7 @@ class CocoXiaoMusicService:
         targets = self._manual_targets(target_dids)
         results = []
         for did in targets:
+            self._cancel_pause_verify(did)
             device = self.xiaomusic.device_manager.devices.get(did)
             if not device:
                 results.append({"did": did, "success": False, "error": "device not found"})
