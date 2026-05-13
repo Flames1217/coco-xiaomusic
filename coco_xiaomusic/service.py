@@ -112,6 +112,16 @@ class CocoXiaoMusicService:
     def _clean_keyword(arg: str) -> str:
         return re.sub(r"^(播放歌曲|播放|放|来一首)\s*", "", arg.strip())
 
+    def _candidate_queries(self, keyword: str) -> list[str]:
+        candidates = []
+        for wrong, right in self.settings.query_replacements.items():
+            if wrong in keyword:
+                candidates.append(keyword.replace(wrong, right))
+        if "的" in keyword:
+            artist, title = keyword.split("的", 1)
+            candidates.extend([title, f"{title} {artist}", f"{artist} {title}"])
+        return list(dict.fromkeys(item.strip() for item in candidates if item.strip()))
+
     def _build_xiaomusic(self) -> XiaoMusic:
         self._patch_xiaomusic_logger()
         user_keywords = {keyword: "online_play" for keyword in self.settings.coco_keywords}
@@ -161,6 +171,7 @@ class CocoXiaoMusicService:
 
     async def _run(self):
         try:
+            self._cleanup_temp_audio()
             self.xiaomusic = self._build_xiaomusic()
             await self.xiaomusic.reinit()
             await self._discover_devices()
@@ -175,6 +186,20 @@ class CocoXiaoMusicService:
             self.state.starting = False
             self.state.startup_error = str(exc)
             self._log("error", f"xiaomusic 启动失败：{exc!r}")
+
+    def _cleanup_temp_audio(self):
+        temp_dir = Path("music/tmp")
+        if not temp_dir.exists():
+            return
+        removed = 0
+        for item in temp_dir.glob("*.mp3"):
+            try:
+                item.unlink()
+                removed += 1
+            except OSError:
+                continue
+        if removed:
+            self._log("info", f"已清理历史临时语音文件 {removed} 个")
 
     async def _discover_devices(self):
         self.state.discovered_devices = []
@@ -267,14 +292,17 @@ class CocoXiaoMusicService:
         self._log("info", f"coco 搜索：{keyword}", keyword=keyword)
 
         search_task = asyncio.get_running_loop().run_in_executor(
-            None, self.coco.search_first, keyword
+            None,
+            self.coco.search_best,
+            keyword,
+            self._candidate_queries(keyword),
         )
         device = await self._take_over_device(did)
         if not device:
             self.state.last_error = "device not found"
             return {"success": False, "error": "device not found"}
         try:
-            song, url = await search_task
+            song, url, matched_query = await search_task
         except Exception as exc:
             self.state.last_error = str(exc)
             self._log("error", f"coco 请求失败：{exc!r}", keyword=keyword)
@@ -298,6 +326,8 @@ class CocoXiaoMusicService:
                 "song": song.raw,
             }
 
+        if matched_query != keyword:
+            self._log("info", f"已用纠错候选重新检索：{matched_query}", keyword=keyword)
         return await self._play_song(device, did, keyword, song, url)
 
     async def _play_song(self, device, did: str, keyword: str, song: CocoSong, url: str):
@@ -311,6 +341,7 @@ class CocoXiaoMusicService:
         )
         await self._take_over_device(did)
         push_result = await self.xiaomusic.play_url(did, url)
+        self._log("info", f"播放下发结果：{push_result!r}", keyword=keyword, song=song.raw)
         await asyncio.sleep(2)
         status = await self.xiaomusic.get_player_status(did=did)
         is_playing = status.get("status") == 1

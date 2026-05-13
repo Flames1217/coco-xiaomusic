@@ -38,6 +38,7 @@ class AppSettings:
     error_tts: str = "coco暂时没有拿到可播放的第一条结果"
     edge_tts_voice: str = "zh-CN-XiaoyiNeural"
     coco_keywords: tuple[str, ...] = DEFAULT_KEYWORDS
+    query_replacements: dict[str, str] = None
     device_aliases: dict[str, str] = None
 
     @classmethod
@@ -86,6 +87,8 @@ class AppSettings:
         )
 
     def __post_init__(self):
+        if self.query_replacements is None:
+            self.query_replacements = {"雀跃": "缺月", "溯": "宿"}
         if self.device_aliases is None:
             self.device_aliases = {}
 
