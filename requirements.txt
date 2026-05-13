@@ -4,3 +4,4 @@ python-multipart>=0.0.20
 requests>=2.32
 rich>=13.9
 xiaomusic>=0.5.3
+pywin32>=306; platform_system == "Windows"

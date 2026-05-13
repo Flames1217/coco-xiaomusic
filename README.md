@@ -62,3 +62,30 @@ data/app_settings.json
 ```
 
 当前按你的要求不依赖环境变量。
+
+## 注册为 Windows 服务
+
+Windows 上可以直接用项目自带的原生服务入口，不依赖 NSSM。
+
+先安装依赖：
+
+```powershell
+python -m pip install -r .\requirements.txt
+```
+
+然后用管理员 PowerShell 执行：
+
+```powershell
+python .\windows_service.py --startup auto install
+python .\windows_service.py start --wait 10
+```
+
+常用维护命令：
+
+```powershell
+python .\windows_service.py stop
+python .\windows_service.py restart
+python .\windows_service.py remove
+```
+
+服务默认读取项目目录内的 `data/`、`conf/`、`music/`，所以请保持整个项目目录可访问。`pywin32` 官方也提醒，Windows 服务运行账号必须能访问 Python 安装目录及相关 DLL；如果你的 Python 装在个人用户目录，建议把服务账号改成你自己的 Windows 账号，或者使用系统可访问的 Python 安装路径。
