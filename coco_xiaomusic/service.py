@@ -69,6 +69,7 @@ class CocoXiaoMusicService:
         self._stream_sources: dict[str, dict] = {}
         self._control_version = 0
         self._last_mina_error_log_at: dict[str, float] = {}
+        self._mina_quiet_error_count: dict[str, int] = {}
         self._patch_online_play()
         self._patch_command_observer()
 
@@ -113,6 +114,35 @@ class CocoXiaoMusicService:
                 console.print(f"[{style}]{prefix}[/{style}] {message}")
             except UnicodeEncodeError:
                 console.print(f"[{style}]{prefix}[/{style}] {repair_text(message)}")
+
+    @staticmethod
+    def _is_noisy_mina_error(exc: Exception) -> bool:
+        text = repr(exc)
+        if "api2.mina.mi.com/remote/ubus" not in text:
+            return False
+        return any(
+            marker in text
+            for marker in (
+                '"code":999',
+                "'code': 999",
+                '"code": 999',
+                '"code":101',
+                "'code': 101",
+                '"code": 101',
+                '"message":"Unknown"',
+                "'message': 'Unknown'",
+            )
+        )
+
+    def _record_quiet_mina_error(self, did: str, exc: Exception):
+        self._mina_quiet_error_count[did] = self._mina_quiet_error_count.get(did, 0) + 1
+
+    def _is_quiet_mina_error(self, did: str, exc: Exception) -> bool:
+        if self._is_noisy_mina_error(exc):
+            return True
+        if isinstance(exc, KeyError) and str(exc).strip("'\"") == str(did):
+            return True
+        return False
 
     def _patch_online_play(self):
         async def coco_online_play(_, did="", arg1="", **kwargs):
@@ -407,6 +437,9 @@ class CocoXiaoMusicService:
                     try:
                         messages = await mina_service.get_latest_ask(device_id)
                     except Exception as exc:
+                        if self._is_noisy_mina_error(exc):
+                            self._record_quiet_mina_error(did, exc)
+                            continue
                         self._log("warn", f"Mina 拉取失败 did={did}：{exc!r}")
                         continue
                     pending: list[tuple[int, str]] = []
@@ -812,11 +845,14 @@ class CocoXiaoMusicService:
 
     def _fallback_player_status(self, did: str, exc: Exception | None = None, assume_playing: bool = False) -> dict:
         if exc is not None:
-            now = time.monotonic()
-            last = self._last_mina_error_log_at.get(did, 0)
-            if now - last > 30:
-                self._last_mina_error_log_at[did] = now
-                self._log("warn", f"Mina 拉取失败 did={did}，播放器使用本地状态兜底：{exc!r}")
+            if self._is_quiet_mina_error(did, exc):
+                self._record_quiet_mina_error(did, exc)
+            else:
+                now = time.monotonic()
+                last = self._last_mina_error_log_at.get(did, 0)
+                if now - last > 30:
+                    self._last_mina_error_log_at[did] = now
+                    self._log("warn", f"Mina 拉取失败 did={did}，播放器使用本地状态兜底：{exc!r}")
         return {
             "status": 2 if self.state.playback_paused else (1 if (assume_playing or self.state.last_used_url) else 0),
             "volume": None,
@@ -1085,14 +1121,14 @@ class CocoXiaoMusicService:
                 status = await self.xiaomusic.get_player_status(did=did)
                 results.append({"did": did, "success": True, "status": status})
             except Exception as exc:
-                results.append(
-                    {
-                        "did": did,
-                        "success": True,
-                        "warning": repr(exc),
-                        "status": self._fallback_player_status(did, exc),
-                    }
-                )
+                item = {
+                    "did": did,
+                    "success": True,
+                    "status": self._fallback_player_status(did, exc),
+                }
+                if not self._is_quiet_mina_error(did, exc):
+                    item["warning"] = repr(exc)
+                results.append(item)
         return {"success": any(item["success"] for item in results), "targets": results}
 
     async def update_account(self, account: str, password: str, hostname: str):
