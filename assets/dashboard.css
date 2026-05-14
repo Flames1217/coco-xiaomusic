@@ -868,13 +868,51 @@ body.player-playing .album-art {
 }
 
 .play-button {
+  position: relative;
   width: 54px;
   height: 54px;
   padding: 0;
   color: #130f08;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   box-shadow: 0 12px 30px rgba(245, 166, 35, 0.28);
-  font-size: 20px;
+}
+
+.play-button::before,
+.play-button::after {
+  content: "";
+  display: block;
+}
+
+.play-button::before {
+  width: 0;
+  height: 0;
+  margin-left: 4px;
+  border-block: 9px solid transparent;
+  border-left: 14px solid #130f08;
+}
+
+.play-button::after {
+  display: none;
+}
+
+body.player-playing .play-button::before,
+body.player-playing .play-button::after {
+  width: 5px;
+  height: 18px;
+  border: 0;
+  border-radius: 2px;
+  background: #130f08;
+}
+
+body.player-playing .play-button::before {
+  margin-left: 0;
+  transform: translateX(-4px);
+}
+
+body.player-playing .play-button::after {
+  display: block;
+  position: absolute;
+  transform: translateX(5px);
 }
 
 .progress-row {

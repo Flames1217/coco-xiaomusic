@@ -406,7 +406,6 @@ function setPlayerButtonState(statusCode) {
   if (!button) return;
   const isPlaying = statusCode === 1;
   document.body.classList.toggle("player-playing", isPlaying);
-  button.textContent = isPlaying ? "Ⅱ" : "▶";
   button.title = isPlaying ? "暂停" : "播放";
   button.setAttribute("aria-label", button.title);
 }
