@@ -4,10 +4,7 @@ from pathlib import Path
 
 root = Path(SPECPATH).parents[1]
 
-datas = [
-    (str(root / "assets"), "assets"),
-    (str(root / "views"), "views"),
-]
+datas = []
 
 hiddenimports = [
     "uvicorn.logging",
@@ -20,7 +17,6 @@ hiddenimports = [
     "uvicorn.protocols.websockets.auto",
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
-    "webview.platforms.edgechromium",
     "win32timezone",
 ]
 

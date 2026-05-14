@@ -7,5 +7,4 @@ xiaomusic>=0.5.3
 pypinyin>=0.51
 edge-tts>=7.0
 pywin32>=306; platform_system == "Windows"
-pywebview>=5.3; platform_system == "Windows"
 pyinstaller>=6.10; platform_system == "Windows"

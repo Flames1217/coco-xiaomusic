@@ -22,11 +22,18 @@ New-Item -ItemType Directory -Force `
   (Join-Path $Portable "music\cache"), `
   (Join-Path $Portable "logs") | Out-Null
 
-$Launcher = Join-Path $Portable "启动 coco-xiaomusic.bat"
+$Launcher = Join-Path $Portable "start-coco-xiaomusic.bat"
 Set-Content -Path $Launcher -Encoding ASCII -Value '@echo off
 cd /d "%~dp0"
 start "" "%~dp0coco-xiaomusic.exe"
 '
 
-Write-Host "桌面应用已生成：$Root\dist\coco-xiaomusic\coco-xiaomusic.exe"
-Write-Host "便携版已生成：$Portable"
+$PortableZip = Join-Path $Root "release\coco-xiaomusic-portable.zip"
+if (Test-Path $PortableZip) {
+  Remove-Item $PortableZip -Force
+}
+Compress-Archive -Path (Join-Path $Portable "*") -DestinationPath $PortableZip -Force
+
+Write-Host "Desktop app generated: $Root\dist\coco-xiaomusic\coco-xiaomusic.exe"
+Write-Host "Portable directory generated: $Portable"
+Write-Host "Portable archive generated: $PortableZip"

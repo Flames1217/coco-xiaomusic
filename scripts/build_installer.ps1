@@ -17,8 +17,8 @@ if (-not $Iscc) {
 }
 
 if (-not $Iscc) {
-  throw "未找到 Inno Setup 6。请先安装 Inno Setup，或只使用 release\coco-xiaomusic-portable 便携版。"
+  throw "Inno Setup 6 not found. Install Inno Setup or use release\coco-xiaomusic-portable.zip."
 }
 
 & $Iscc.Source ".\packaging\installer\coco-xiaomusic.iss"
-Write-Host "安装包已生成：$Root\release\coco-xiaomusic-setup.exe"
+Write-Host "Installer generated: $Root\release\coco-xiaomusic-setup.exe"
