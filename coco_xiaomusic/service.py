@@ -171,6 +171,7 @@ class CocoXiaoMusicService:
                     return
                 self._recent_voice_commands[dedupe_key] = now
                 self._log("info", f"关键词命中，跳过官方处理链路：{cleaned}", keyword=cleaned)
+                await self._silence_official_channel(did)
                 await self.play_keyword(did, keyword)
                 return
             return await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
@@ -318,7 +319,7 @@ class CocoXiaoMusicService:
             mi_did=",".join(self.settings.selected_dids),
             hostname=self.settings.hostname,
             port=self.settings.xiaomusic_port,
-            enable_pull_ask=True,
+            enable_pull_ask=False,
             enable_force_stop=True,
             pull_ask_sec=1,
             edge_tts_voice=self.settings.edge_tts_voice,
@@ -462,6 +463,8 @@ class CocoXiaoMusicService:
                     for timestamp, query in sorted(pending):
                         self._last_mina_timestamp[did] = max(self._last_mina_timestamp.get(did, 0), timestamp)
                         self._log("info", f"Mina 捕获语音：{query}", keyword=query)
+                        if self._is_coco_command(query):
+                            await self._silence_official_channel(did)
                         await self.xiaomusic.do_check_cmd(did=did, query=query, ctrl_panel=False)
                 await asyncio.sleep(0.2)
             except asyncio.CancelledError:
@@ -733,6 +736,31 @@ class CocoXiaoMusicService:
         await device.cancel_group_next_timer()
         await device.group_force_stop_xiaoai()
         return device
+
+    async def _silence_official_channel(self, did: str):
+        if not self.xiaomusic:
+            return
+        device = self.xiaomusic.device_manager.devices.get(did)
+        if not device:
+            return
+        try:
+            device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+        except Exception:
+            device_ids = [device.device_id]
+
+        async def silence_one(device_id: str):
+            mina_service = getattr(getattr(device, "auth_manager", None), "mina_service", None)
+            if not mina_service:
+                return
+            for action in (mina_service.player_pause, mina_service.player_stop):
+                try:
+                    await action(device_id)
+                except Exception as exc:
+                    if not self._is_quiet_mina_error(did, exc):
+                        self._log("warn", f"静默接管失败 did={did}：{exc!r}")
+
+        await device.cancel_group_next_timer()
+        await asyncio.gather(*(silence_one(device_id) for device_id in device_ids), return_exceptions=True)
 
     async def _speak_if_needed(self, device, template: str, keyword: str, artist: str, title: str):
         text = (template or "").strip()
