@@ -492,6 +492,12 @@ button.ghost,
   background: rgba(33, 211, 138, 0.08);
 }
 
+.badge.warn {
+  color: var(--accent);
+  border-color: rgba(245, 166, 35, 0.34);
+  background: rgba(245, 166, 35, 0.1);
+}
+
 .result-actions {
   display: flex;
   align-items: center;

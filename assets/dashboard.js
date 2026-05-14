@@ -473,7 +473,9 @@ async function runPlayerAction(message, url, body = new FormData()) {
 }
 
 function applyPlayerIntent(playing) {
-  const position = currentProgressSeconds();
+  const current = currentProgressSeconds();
+  const reachedEnd = playing && playerDurationSec > 0 && current >= playerDurationSec - 0.35;
+  const position = reachedEnd ? 0 : current;
   latestPlayerStatus = playing ? 1 : 2;
   playerPositionSec = position;
   playerStartedAtMs = playing ? Date.now() - position * 1000 : 0;
@@ -545,9 +547,9 @@ function renderPreviewItems(items) {
     const album = song.album || song.extra?.album || "";
     const audioType = song.audio_type || song.type || song.extra?.type || "";
     const bitrate = song.bitrate || song.quality || song.extra?.bitrate || "";
-    const badge = entry.is_first
-      ? '<span class="badge good">语音默认</span>'
-      : '<span class="badge">可选</span>';
+    const badge = entry.preview_reason
+      ? '<span class="badge warn">试听片段</span>'
+      : (entry.is_first ? '<span class="badge good">语音默认</span>' : '<span class="badge">可选</span>');
 
     const row = document.createElement("article");
     row.className = "preview-item";
@@ -559,6 +561,7 @@ function renderPreviewItems(items) {
         <div class="preview-meta">
           <span>渠道 ${providerLabel(provider)}</span>
           <span>时长 ${duration}</span>
+          ${entry.preview_reason ? `<span>已避开 ${entry.preview_reason}</span>` : ""}
           ${album ? `<span>专辑 ${album}</span>` : ""}
           ${audioType || bitrate ? `<span>${[audioType, bitrate].filter(Boolean).join(" · ")}</span>` : ""}
         </div>
@@ -592,13 +595,15 @@ function renderPreviewItems(items) {
       body.set("album", target.dataset.album || "");
       body.set("audio_type", target.dataset.audioType || "");
       body.set("bitrate", target.dataset.bitrate || "");
-      await runAction("正在推送选中的歌曲...", "/api/play-selected", body);
-      showBottomPlayer();
-      latestPlayerStatus = 1;
-      playerStartedAtMs = Date.now();
-      playerPositionSec = 0;
-      currentPlaybackAt = "";
-      setPlayerButtonState(latestPlayerStatus);
+      const result = await runAction("正在推送选中的歌曲...", "/api/play-selected", body);
+      if (result?.success) {
+        showBottomPlayer();
+        latestPlayerStatus = 1;
+        playerStartedAtMs = Date.now();
+        playerPositionSec = 0;
+        currentPlaybackAt = "";
+        setPlayerButtonState(latestPlayerStatus);
+      }
       await refreshPlayer({ silent: false });
     });
 

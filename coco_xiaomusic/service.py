@@ -56,6 +56,11 @@ class RuntimeState:
 
 
 class CocoXiaoMusicService:
+    PREVIEW_MAX_SECONDS = 75.0
+    PREVIEW_MIN_EXPECTED_SECONDS = 90.0
+    PREVIEW_RATIO = 0.68
+    PREVIEW_MARKERS = ("试听", "片段", "preview", "demo", "sample")
+
     def __init__(self, settings: AppSettings):
         self.settings = settings
         self.coco = CocoClient(settings.coco_base)
@@ -174,6 +179,13 @@ class CocoXiaoMusicService:
                 await self._silence_official_channel(did)
                 await self.play_keyword(did, keyword)
                 return
+            if cleaned and not ctrl_panel and self._is_active_coco_playback():
+                interrupted_at = self._mark_external_voice_interruption(cleaned)
+                version = self._control_version
+                result = await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
+                if self._looks_like_volume_command(cleaned):
+                    asyncio.create_task(self._resume_after_volume_command(did, interrupted_at, version))
+                return result
             return await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
 
         observed_do_check_cmd._coco_observed = True
@@ -208,6 +220,33 @@ class CocoXiaoMusicService:
             if index >= 0:
                 return self._clean_keyword(text[index + len(keyword):].strip())
         return self._clean_keyword(text)
+
+    def _is_active_coco_playback(self) -> bool:
+        if self._sync_natural_playback_end():
+            return False
+        return bool(self.state.last_playback_at and self.state.last_used_url and not self.state.playback_paused)
+
+    @staticmethod
+    def _looks_like_volume_command(query: str) -> bool:
+        text = re.sub(r"\s+", "", query or "")
+        return any(marker in text for marker in ("音量", "声音", "大声", "小声", "百分之"))
+
+    def _mark_external_voice_interruption(self, query: str) -> float:
+        position = self._current_position_seconds()
+        self.state.last_position = position
+        self.state.playback_paused = True
+        self._next_control_version()
+        self._log("warn", f"检测到非 coco 语音指令，已冻结播放器进度：{query}", keyword=query)
+        return position
+
+    async def _resume_after_volume_command(self, did: str, position: float, version: int):
+        await asyncio.sleep(1.4)
+        if version != self._control_version or not self.state.playback_paused:
+            return
+        if not self.state.last_used_url:
+            return
+        self._log("info", f"音量指令后自动续播，进度 {position:.1f}s")
+        await self.seek_playback(position, [did])
 
     @staticmethod
     def _split_query(keyword: str) -> tuple[str, str]:
@@ -281,7 +320,37 @@ class CocoXiaoMusicService:
         score = title_score * 0.62 + artist_score * 0.28 + contains_bonus + order_bonus + cover_bonus + provider_bonus
         if query_artist and artist_score < 0.52:
             score -= 0.35
+        if self._has_preview_marker(song):
+            score -= 0.45
         return score
+
+    @classmethod
+    def _has_preview_marker(cls, song: CocoSong) -> bool:
+        raw = song.raw or {}
+        text = " ".join(
+            str(value or "")
+            for value in (
+                song.title,
+                song.artist,
+                song.album,
+                raw.get("title"),
+                raw.get("artist"),
+                raw.get("album"),
+                raw.get("name"),
+                raw.get("remark"),
+            )
+        ).lower()
+        return any(marker in text for marker in cls.PREVIEW_MARKERS)
+
+    @classmethod
+    def _is_preview_duration(cls, expected_seconds: float, actual_seconds: float) -> bool:
+        if actual_seconds <= 0:
+            return False
+        if actual_seconds > cls.PREVIEW_MAX_SECONDS:
+            return False
+        if expected_seconds >= cls.PREVIEW_MIN_EXPECTED_SECONDS:
+            return actual_seconds <= expected_seconds * cls.PREVIEW_RATIO
+        return False
 
     async def _collect_ranked_songs(self, keyword: str) -> list[tuple[float, CocoSong, str]]:
         loop = asyncio.get_running_loop()
@@ -484,6 +553,7 @@ class CocoXiaoMusicService:
         if not keyword:
             self.state.last_error = "empty keyword"
             self._log("error", "没有识别到歌曲关键词")
+            await self._speak_error_for_did(did, "没有识别到歌曲关键词，请换一种说法再试一次", keyword="")
             return {"success": False, "error": "empty keyword"}
 
         self.state.last_keyword = keyword
@@ -495,6 +565,7 @@ class CocoXiaoMusicService:
         if not device:
             search_task.cancel()
             self.state.last_error = "device not found"
+            await self._speak_error_for_did(did, "没有找到可播放的目标音箱", keyword=keyword)
             return {"success": False, "error": "device not found"}
 
         await self._speak_if_needed(device, self.settings.search_tts, keyword=keyword, artist="", title="")
@@ -526,6 +597,17 @@ class CocoXiaoMusicService:
                 self._log("warn", f"候选无直链：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
                 continue
             local_url = self._stream_url_for_speaker(url, song)
+            duration = await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url, 8)
+            preview_reason = self._preview_skip_reason(song, duration)
+            if preview_reason:
+                last_error = preview_reason
+                self._log(
+                    "warn",
+                    f"跳过疑似试听片段：{song.title} - {song.artist} [{song.provider}]，{preview_reason}",
+                    keyword=keyword,
+                    song=song.raw,
+                )
+                continue
             if index > 0:
                 self._log("warn", f"前 {index} 条候选不可用，已切到可推送结果：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
             if matched_query != keyword:
@@ -553,6 +635,7 @@ class CocoXiaoMusicService:
         if not target.get("success"):
             self.state.last_error = f"target failed: {target!r}"
             self._log("error", f"推送失败：did={did}，状态={target.get('status')!r}", keyword=keyword, song=song.raw)
+            await self._speak_error_for_did(did, "歌曲已经找到，但是音箱播放失败，请稍后再试或换一首", keyword=keyword)
             return {"success": False, "song": song.raw, "url": url, "targets": results}
 
         status = target.get("status", {})
@@ -682,11 +765,28 @@ class CocoXiaoMusicService:
         return 0.0
 
     def _resolve_song_duration(self, song: CocoSong, url: str, timeout: int = 12) -> float:
-        duration = self._song_duration_seconds(song.raw or {})
-        if duration <= 0:
-            duration = self._probe_duration_seconds(url, timeout=timeout)
+        raw = song.raw or {}
+        expected = float(raw.get("_expected_duration") or self._song_duration_seconds(raw) or 0)
+        if song.raw is not None and expected > 0:
+            song.raw["_expected_duration"] = expected
+
+        if song.raw is not None and song.raw.get("_duration_probed"):
+            return self._song_duration_seconds(song.raw)
+
+        probed = self._probe_duration_seconds(url, timeout=timeout)
+        if song.raw is not None:
+            song.raw["_duration_probed"] = True
+        duration = probed if probed > 0 else expected
         self._apply_song_duration(song, duration)
         return duration
+
+    def _preview_skip_reason(self, song: CocoSong, actual_seconds: float) -> str:
+        expected = float((song.raw or {}).get("_expected_duration") or 0)
+        if self._has_preview_marker(song):
+            return "标题或信息包含试听标记"
+        if self._is_preview_duration(expected, actual_seconds):
+            return f"真实音频约 {actual_seconds:.0f}s，明显短于标注 {expected:.0f}s"
+        return ""
 
     def _current_position_seconds(self) -> float:
         if self.state.playback_paused:
@@ -874,6 +974,21 @@ class CocoXiaoMusicService:
         except Exception as exc:
             self._log("warn", f"提示话术失败：{exc!r}")
 
+    async def _speak_error_for_did(self, did: str, text: str, keyword: str = ""):
+        if not did or not self.xiaomusic:
+            return
+        device = await self._take_over_device(did)
+        if not device:
+            return
+        template = text or self.settings.error_tts
+        await self._speak_if_needed(device, template, keyword=keyword, artist="", title="")
+
+    async def _speak_error_for_targets(self, target_dids: list[str] | None, text: str, keyword: str = ""):
+        targets = self._manual_targets(target_dids)
+        if not targets:
+            return
+        await self._speak_error_for_did(targets[0], text, keyword=keyword)
+
     async def _delete_temp_file_later(self, filepath: Path, delay: int = 90):
         await asyncio.sleep(delay)
         for _ in range(6):
@@ -892,21 +1007,31 @@ class CocoXiaoMusicService:
         enrich_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
         duration_tasks = []
         for song, result in zip(songs[: min(enrich_count, 8)], enrich_results[:8]):
-            if isinstance(result, dict) and result.get("url") and self._song_duration_seconds(song.raw or {}) <= 0:
+            if isinstance(result, dict) and result.get("url"):
                 duration_tasks.append(loop.run_in_executor(None, self._resolve_song_duration, song, result["url"], 6))
         if duration_tasks:
             await asyncio.gather(*duration_tasks, return_exceptions=True)
+        voice_default_index = next(
+            (
+                index
+                for index, song in enumerate(songs)
+                if not self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+            ),
+            0,
+        )
         preview = []
         for index, song in enumerate(songs):
             has_url = None
             if index < enrich_count:
                 result = enrich_results[index]
                 has_url = isinstance(result, dict) and bool(result.get("url"))
+            preview_reason = self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
             preview.append(
                 {
                     "item": song.raw,
-                    "is_first": index == 0,
+                    "is_first": index == voice_default_index,
                     "has_url": has_url,
+                    "preview_reason": preview_reason,
                 }
             )
         return {"items": preview}
@@ -934,8 +1059,13 @@ class CocoXiaoMusicService:
                 if not device:
                     results.append({"did": did, "success": False, "error": "device not found"})
                     continue
-            push_ret = await self.xiaomusic.play_url(did, local_url)
-            status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(push_ret) == 0)
+            try:
+                push_ret = await self.xiaomusic.play_url(did, local_url)
+                status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(push_ret) == 0)
+            except Exception as exc:
+                self._log("error", f"播放下发异常：did={did} {exc!r}", song=song.raw)
+                results.append({"did": did, "success": False, "error": repr(exc), "used_url": local_url})
+                continue
             results.append(
                 {
                     "did": did,
@@ -954,14 +1084,18 @@ class CocoXiaoMusicService:
 
     async def _resolve_selected_url_with_fallback(self, song: CocoSong) -> tuple[CocoSong, str | None, str]:
         loop = asyncio.get_running_loop()
+        first_error = "no url"
         try:
             url = await loop.run_in_executor(None, self.coco.resolve_url, song)
             if url:
-                return song, url, ""
+                duration = await loop.run_in_executor(None, self._resolve_song_duration, song, url, 8)
+                preview_reason = self._preview_skip_reason(song, duration)
+                if not preview_reason:
+                    return song, url, ""
+                first_error = preview_reason
+                self._log("warn", f"指定歌曲疑似试听片段，尝试同曲兜底：{song.title} - {song.artist} [{song.provider}]，{preview_reason}", song=song.raw)
         except Exception as exc:
             first_error = repr(exc)
-        else:
-            first_error = "no url"
 
         title_key = self._compact_text(song.title)
         artist_key = self._compact_text(song.artist)
@@ -982,6 +1116,11 @@ class CocoXiaoMusicService:
                 self._log("warn", f"同曲兜底解析失败：{candidate.title} - {candidate.artist} [{candidate.provider}] {exc!r}", song=candidate.raw)
                 continue
             if url:
+                duration = await loop.run_in_executor(None, self._resolve_song_duration, candidate, url, 8)
+                preview_reason = self._preview_skip_reason(candidate, duration)
+                if preview_reason:
+                    self._log("warn", f"同曲兜底跳过试听片段：{candidate.title} - {candidate.artist} [{candidate.provider}]，{preview_reason}", song=candidate.raw)
+                    continue
                 self._log(
                     "warn",
                     f"指定渠道不可用，已切到同曲渠道：{candidate.title} - {candidate.artist} [{candidate.provider}]",
@@ -1127,12 +1266,14 @@ class CocoXiaoMusicService:
         if not url:
             self.state.last_error = first_error or "selected song has no url"
             self._log("error", f"指定歌曲解析失败，且同曲兜底不可用：{title} - {artist} [{provider}]", song=song.raw)
+            await self._speak_error_for_targets(target_dids, "这首歌的音源解析失败，已经没有可用的同曲渠道", keyword=title)
             return {"success": False, "error": self.state.last_error}
 
         self._next_control_version()
         await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url)
         results = await self._play_url_to_targets(url, target_dids, song)
         if not any(item["success"] for item in results):
+            await self._speak_error_for_targets(target_dids, "歌曲已经找到，但是音箱播放失败，请稍后再试或换一首", keyword=title)
             return {"success": False, "error": "all target devices failed", "targets": results}
         self.state.last_song = song.raw
         self.state.last_duration = self._song_duration_seconds(song.raw or {})
@@ -1195,7 +1336,15 @@ class CocoXiaoMusicService:
         if not self.xiaomusic:
             return {"success": False, "error": "xiaomusic not ready"}
         if not self.state.last_used_url:
+            await self._speak_error_for_targets(target_dids, "没有可以继续播放的上一首歌曲")
             return {"success": False, "error": "no previous stream url"}
+        if self._sync_natural_playback_end() or (
+            self.state.last_duration > 0 and self.state.last_position >= self.state.last_duration - 0.8
+        ):
+            self.state.last_position = 0.0
+            self.state.playback_paused = True
+            self._log("info", "上一首已播完，正在从头重新播放")
+            return await self.seek_playback(0.0, target_dids)
         targets = self._manual_targets(target_dids)
         results = []
         resumed_from = max(0.0, self.state.last_position)
@@ -1230,6 +1379,7 @@ class CocoXiaoMusicService:
         except Exception as exc:
             self.state.last_error = repr(exc)
             self._log("error", f"进度跳转失败：{exc!r}")
+            await self._speak_error_for_targets(target_dids, "进度跳转失败，请稍后再试")
             return {"success": False, "error": repr(exc)}
         results = []
         for did in targets:
@@ -1279,6 +1429,10 @@ class CocoXiaoMusicService:
                 if self._sync_natural_playback_end():
                     status = dict(status)
                     status["status"] = 0
+                elif status.get("status") == 0 and self.state.last_playback_at and not self.state.playback_paused:
+                    self.state.last_position = self._current_position_seconds()
+                    self.state.playback_paused = True
+                    self._log("warn", "音箱已停止播放，已冻结播放器进度")
                 results.append({"did": did, "success": True, "status": status})
             except Exception as exc:
                 item = {
