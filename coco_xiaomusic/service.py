@@ -699,6 +699,14 @@ class CocoXiaoMusicService:
             elapsed = min(elapsed, self.state.last_duration)
         return elapsed
 
+    def _sync_natural_playback_end(self, grace_seconds: float = 0.8) -> bool:
+        if self.state.playback_paused or not self.state.last_playback_at or self.state.last_duration <= 0:
+            return False
+        if self._current_position_seconds() < max(0.0, self.state.last_duration - grace_seconds):
+            return False
+        self.state.last_position = self.state.last_duration
+        return True
+
     def _media_url_for(self, filepath: Path) -> str:
         media_root = Path("music/tmp").resolve()
         relative = filepath.resolve().relative_to(media_root).as_posix()
@@ -1002,8 +1010,9 @@ class CocoXiaoMusicService:
                 if now - last > 30:
                     self._last_mina_error_log_at[did] = now
                     self._log("warn", f"Mina 拉取失败 did={did}，播放器使用本地状态兜底：{exc!r}")
+        ended = self._sync_natural_playback_end()
         return {
-            "status": 2 if self.state.playback_paused else (1 if (assume_playing or self.state.last_used_url) else 0),
+            "status": 0 if ended else (2 if self.state.playback_paused else (1 if (assume_playing or self.state.last_used_url) else 0)),
             "volume": None,
             "loop_type": 1,
             "local_fallback": True,
@@ -1264,6 +1273,9 @@ class CocoXiaoMusicService:
         for did in targets:
             try:
                 status = await self.xiaomusic.get_player_status(did=did)
+                if self._sync_natural_playback_end():
+                    status = dict(status)
+                    status["status"] = 0
                 results.append({"did": did, "success": True, "status": status})
             except Exception as exc:
                 item = {

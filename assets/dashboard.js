@@ -161,7 +161,15 @@ function setProgressUI(seconds) {
 
 function updateProgress() {
   if (progressEditing) return;
-  setProgressUI(currentProgressSeconds());
+  const seconds = currentProgressSeconds();
+  setProgressUI(seconds);
+  if (latestPlayerStatus === 1 && playerDurationSec > 0 && seconds >= playerDurationSec - 0.35) {
+    playerPositionSec = playerDurationSec;
+    playerStartedAtMs = 0;
+    latestPlayerStatus = 0;
+    setProgressUI(playerDurationSec);
+    setPlayerButtonState(0);
+  }
 }
 
 function providerLabel(provider) {
@@ -299,6 +307,12 @@ function renderPlayerSummary(status) {
   }
   if (status.playback_paused) {
     playerStartedAtMs = 0;
+  }
+  if (!status.playback_paused && playerDurationSec > 0 && playerPositionSec >= playerDurationSec - 0.35) {
+    playerPositionSec = playerDurationSec;
+    playerStartedAtMs = 0;
+    latestPlayerStatus = 0;
+    setPlayerButtonState(0);
   }
   updateProgress();
   setPlayerCover(song.cover || song.extra?.cover || "", title, artist);
