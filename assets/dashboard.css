@@ -918,6 +918,13 @@ body.player-playing .album-art {
   appearance: none;
 }
 
+#progress-slider:focus,
+#progress-slider:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
 #progress-slider::-webkit-slider-runnable-track {
   width: 100%;
   height: 4px;
