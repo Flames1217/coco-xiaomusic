@@ -4,6 +4,7 @@ const eventsNode = qs("#events");
 const keywordInput = qs("#keyword");
 const volumeSlider = qs("#volume-slider");
 const progressSlider = qs("#progress-slider");
+const PLAYER_STATUS_INTERVAL_MS = 1500;
 
 let latestStatus = null;
 let latestPlayerStatus = 0;
@@ -172,6 +173,22 @@ function updateProgress() {
   }
 }
 
+function syncPlayerState(statusCode, position = null, { force = false } = {}) {
+  const nextStatus = Number(statusCode || 0);
+  const now = Date.now();
+  if (!force && now < playerActionHoldUntil && nextStatus === 0 && latestPlayerStatus === 1) return;
+  if (position !== null && Number.isFinite(Number(position))) {
+    playerPositionSec = Math.max(0, Number(position));
+  } else {
+    playerPositionSec = currentProgressSeconds();
+  }
+  latestPlayerStatus = nextStatus;
+  playerStartedAtMs = nextStatus === 1 ? Date.now() - playerPositionSec * 1000 : 0;
+  lastPlayerStatusAt = now;
+  setPlayerButtonState(latestPlayerStatus);
+  setProgressUI(playerPositionSec);
+}
+
 function providerLabel(provider) {
   const labels = {
     qq: "QQ音乐",
@@ -307,6 +324,8 @@ function renderPlayerSummary(status) {
   }
   if (status.playback_paused) {
     playerStartedAtMs = 0;
+    latestPlayerStatus = 2;
+    setPlayerButtonState(latestPlayerStatus);
   }
   if (!status.playback_paused && playerDurationSec > 0 && playerPositionSec >= playerDurationSec - 0.35) {
     playerPositionSec = playerDurationSec;
@@ -426,12 +445,17 @@ async function refreshPlayer({ silent = true } = {}) {
   const status = first?.status || {};
   const nextStatusCode = Number(status.status || 0);
   const now = Date.now();
+  const localPaused = Boolean(status.local_playback_paused || latestStatus?.playback_paused);
+  const localPosition = Number(status.local_position);
+  const hasLocalPosition = Number.isFinite(localPosition);
 
-  // 用户刚操作过播放器时，短时间内不让轮询状态抢回按钮和音量。
-  if (now > playerActionHoldUntil && (!silent || now - lastPlayerStatusAt > 3500 || nextStatusCode === latestPlayerStatus)) {
-    latestPlayerStatus = latestStatus?.playback_paused ? 2 : nextStatusCode;
-    lastPlayerStatusAt = now;
-    setPlayerButtonState(latestPlayerStatus);
+  if (localPaused) {
+    syncPlayerState(nextStatusCode === 1 ? 2 : nextStatusCode, hasLocalPosition ? localPosition : null, { force: true });
+  } else if (nextStatusCode !== latestPlayerStatus) {
+    const force = !silent || nextStatusCode === 1 || now > playerActionHoldUntil || now - lastPlayerStatusAt > 1200;
+    syncPlayerState(nextStatusCode, hasLocalPosition ? localPosition : null, { force });
+  } else if (nextStatusCode === 1 && hasLocalPosition && Math.abs(localPosition - currentProgressSeconds()) > 2.5) {
+    syncPlayerState(nextStatusCode, localPosition, { force: true });
   }
 
   setText("#player-did", `DID ${first?.did || "--"}`);
@@ -479,7 +503,7 @@ function applyPlayerIntent(playing) {
   latestPlayerStatus = playing ? 1 : 2;
   playerPositionSec = position;
   playerStartedAtMs = playing ? Date.now() - position * 1000 : 0;
-  playerActionHoldUntil = Date.now() + 4500;
+  playerActionHoldUntil = Date.now() + 1200;
   setPlayerButtonState(latestPlayerStatus);
   setProgressUI(position);
 }
@@ -493,7 +517,7 @@ async function flushPlayerToggleQueue() {
       queuedPlayerState = null;
       const endpoint = targetPlaying ? "/api/resume" : "/api/pause";
       await runPlayerAction(targetPlaying ? "正在继续..." : "正在暂停...", endpoint);
-      playerActionHoldUntil = Date.now() + 4500;
+      playerActionHoldUntil = Date.now() + 1200;
     }
   } finally {
     playerToggleInFlight = false;
@@ -837,5 +861,5 @@ qs("#runtime-form").addEventListener("submit", async (event) => {
 refresh();
 refreshPlayer({ silent: false }).catch(() => {});
 setInterval(refresh, 4000);
-setInterval(() => refreshPlayer({ silent: true }).catch(() => {}), 7000);
+setInterval(() => refreshPlayer({ silent: true }).catch(() => {}), PLAYER_STATUS_INTERVAL_MS);
 setInterval(updateProgress, 1000);

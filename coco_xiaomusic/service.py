@@ -1158,6 +1158,9 @@ class CocoXiaoMusicService:
             "volume": None,
             "loop_type": 1,
             "local_fallback": True,
+            "local_playback_paused": self.state.playback_paused,
+            "local_position": self._current_position_seconds(),
+            "local_duration": self.state.last_duration,
         }
 
     def _cancel_pause_verify(self, did: str):
@@ -1430,9 +1433,14 @@ class CocoXiaoMusicService:
                     status = dict(status)
                     status["status"] = 0
                 elif status.get("status") == 0 and self.state.last_playback_at and not self.state.playback_paused:
+                    status = dict(status)
                     self.state.last_position = self._current_position_seconds()
                     self.state.playback_paused = True
                     self._log("warn", "音箱已停止播放，已冻结播放器进度")
+                status = dict(status)
+                status["local_playback_paused"] = self.state.playback_paused
+                status["local_position"] = self._current_position_seconds()
+                status["local_duration"] = self.state.last_duration
                 results.append({"did": did, "success": True, "status": status})
             except Exception as exc:
                 item = {
