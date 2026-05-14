@@ -1,3 +1,5 @@
+import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,7 +11,18 @@ from .service import CocoXiaoMusicService
 from .settings import settings
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+def _resource_root() -> Path:
+    configured = os.environ.get("COCO_XIAOMUSIC_RESOURCE_ROOT")
+    if configured:
+        return Path(configured).resolve()
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).resolve()
+    return Path(__file__).resolve().parent.parent
+
+
+BASE_DIR = _resource_root()
+MEDIA_DIR = Path.cwd() / "music" / "tmp"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 service = CocoXiaoMusicService(settings)
 
 
@@ -22,7 +35,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="coco-xiaomusic", lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
-app.mount("/media", StaticFiles(directory=BASE_DIR / "music" / "tmp"), name="media")
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -18,7 +18,9 @@ xiaomusic.log.txt
 logs/
 build/
 dist/
+release/
 *.spec
+!packaging/pyinstaller/*.spec
 *.pid
 *.tmp
 *.bak

@@ -133,7 +133,11 @@ python .\windows_service.py remove
 
 ## 打包 Windows 桌面版
 
-如果要生成可分发的 `.exe`，执行：
+桌面版不是要求用户手动开浏览器的开发形态，而是面向普通 Windows 使用的交付形态：双击 `coco-xiaomusic.exe` 会打开独立窗口，并在窗口内自动启动或复用本地后台服务。
+
+### 便携版
+
+如果要生成可直接拷贝到任意目录使用的便携版，执行：
 
 ```powershell
 .\scripts\build_desktop.ps1
@@ -143,9 +147,28 @@ python .\windows_service.py remove
 
 ```text
 dist\coco-xiaomusic\coco-xiaomusic.exe
+release\coco-xiaomusic-portable\
 ```
 
-打包版会把 Python 桌面入口、前端资源和后端代码放进同一个目录。FFmpeg 仍建议放到系统 `PATH`，或者随安装包一起放到项目可识别的位置，例如 `ffmpeg/bin/ffmpeg.exe`。
+`release\coco-xiaomusic-portable` 里会自动生成 `portable.flag`、`data`、`conf`、`music`、`logs` 等目录。只要这个标记文件存在，账号、token、设备方案和日志都会留在便携目录里，适合 U 盘或免安装分发。
+
+### 安装包
+
+如果本机安装了 Inno Setup 6，可以继续生成安装向导：
+
+```powershell
+.\scripts\build_installer.ps1
+```
+
+生成结果位于：
+
+```text
+release\coco-xiaomusic-setup.exe
+```
+
+安装版默认把程序安装到 `Program Files`，运行数据放到 `%APPDATA%\coco-xiaomusic`。如果需要自定义数据目录，可以设置 `COCO_XIAOMUSIC_HOME`。
+
+打包版会把 Python 桌面入口、前端资源和后端代码放进同一个程序目录。FFmpeg 仍建议放到系统 `PATH`，或者随安装包一起放到项目可识别的位置，例如 `ffmpeg/bin/ffmpeg.exe`。
 
 ## 敏感数据与本地文件
 
@@ -178,6 +201,9 @@ assets/dashboard.css         控制台样式
 assets/dashboard.js          控制台交互
 scripts/run_desktop.ps1      启动桌面应用
 scripts/build_desktop.ps1    打包桌面应用
+scripts/build_installer.ps1  打包 Windows 安装包
+packaging/pyinstaller/       PyInstaller 打包配置
+packaging/installer/         Inno Setup 安装包配置
 requirements.txt             Python 依赖
 ```
 
