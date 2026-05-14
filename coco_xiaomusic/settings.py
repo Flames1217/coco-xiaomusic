@@ -6,7 +6,25 @@ from pathlib import Path
 SETTINGS_PATH = Path("data/app_settings.json")
 REPAIRABLE_TEXT_FIELDS = ("search_tts", "found_tts", "error_tts")
 LEGACY_KEYWORDS = ("coco", "COCO", "Coco", "CoCo", "可可")
-DEFAULT_KEYWORDS = ("点歌", "点一首", "搜歌", "可可", "coco", "COCO", "Coco", "CoCo")
+DEFAULT_KEYWORDS = (
+    "点歌",
+    "点个",
+    "点首",
+    "点一首",
+    "搜歌",
+    "搜一下",
+    "来一首",
+    "来首",
+    "放一下",
+    "播放",
+    "放歌",
+    "听歌",
+    "可可",
+    "coco",
+    "COCO",
+    "Coco",
+    "CoCo",
+)
 
 
 def repair_text(value: str) -> str:
@@ -52,7 +70,11 @@ class AppSettings:
                 repaired = True
         keywords = data.get("coco_keywords")
         if isinstance(keywords, list):
-            data["coco_keywords"] = tuple(repair_text(item) for item in keywords)
+            repaired_keywords = [repair_text(item) for item in keywords]
+            merged_keywords = tuple(dict.fromkeys([*repaired_keywords, *DEFAULT_KEYWORDS]))
+            if tuple(keywords) != merged_keywords:
+                repaired = True
+            data["coco_keywords"] = merged_keywords
         if tuple(data.get("coco_keywords", ())) == LEGACY_KEYWORDS:
             data["coco_keywords"] = DEFAULT_KEYWORDS
             repaired = True

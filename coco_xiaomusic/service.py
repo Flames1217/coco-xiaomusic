@@ -191,12 +191,15 @@ class CocoXiaoMusicService:
 
     @staticmethod
     def _clean_keyword(arg: str) -> str:
-        return re.sub(r"^(播放歌曲|播放|放|来一首|点歌|点一首|搜索)\s*", "", arg.strip())
+        return re.sub(
+            r"^(播放歌曲|播放|放歌|放一下|放|来一首|来首|点\s*歌|点个|点首|点一首|搜歌|搜一下|搜索|听歌)\s*",
+            "",
+            arg.strip(),
+        )
 
     def _is_coco_command(self, query: str) -> bool:
-        text = query.strip()
-        lowered = text.lower()
-        return any(keyword.lower() in lowered for keyword in self.settings.coco_keywords if keyword)
+        lowered = re.sub(r"\s+", "", query.strip().lower())
+        return any(re.sub(r"\s+", "", keyword.lower()) in lowered for keyword in self.settings.coco_keywords if keyword)
 
     def _extract_coco_keyword(self, query: str) -> str:
         text = query.strip()
@@ -319,7 +322,7 @@ class CocoXiaoMusicService:
             mi_did=",".join(self.settings.selected_dids),
             hostname=self.settings.hostname,
             port=self.settings.xiaomusic_port,
-            enable_pull_ask=False,
+            enable_pull_ask=True,
             enable_force_stop=True,
             pull_ask_sec=1,
             edge_tts_voice=self.settings.edge_tts_voice,
