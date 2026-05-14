@@ -25,6 +25,16 @@ let playerDurationSec = 0;
 let playerPositionSec = 0;
 let lastCommittedVolume = null;
 
+function activateTab(tabName) {
+  const name = tabName || "console";
+  document.querySelectorAll(".top-tabs button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === name);
+  });
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `tab-${name}`);
+  });
+}
+
 function clampVolume(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -240,6 +250,31 @@ function renderAccountState(status) {
   }
 }
 
+function renderConsoleDevices(status) {
+  const node = qs("#console-device-list");
+  if (!node) return;
+  if (!status.devices.length) {
+    node.innerHTML = '<article class="console-device"><strong>暂无设备</strong><span class="meta">登录成功后会显示设备。</span></article>';
+    return;
+  }
+  node.innerHTML = "";
+  const selected = new Set(status.selected_dids || []);
+  const manual = new Set(status.manual_target_dids || []);
+  for (const device of status.devices) {
+    const roles = [];
+    if (selected.has(device.did)) roles.push("语音监听");
+    if (manual.has(device.did)) roles.push("默认推送");
+    const row = document.createElement("article");
+    row.className = "console-device";
+    row.innerHTML = `
+      <strong>${device.name || "未命名设备"}</strong>
+      <span class="meta">DID：${device.did || "--"} · ${device.hardware || "未知型号"}</span>
+      <div class="roles">${roles.length ? roles.map((role) => `<span>${role}</span>`).join("") : "<span>未启用</span>"}</div>
+    `;
+    node.appendChild(row);
+  }
+}
+
 function renderPlayerSummary(status) {
   const song = status.last_song || {};
   const hasPlayableStream = Boolean(status.last_used_url && status.last_playback_at);
@@ -280,8 +315,10 @@ function renderStatus(payload) {
 
   setText("#device-id", status.selected_dids.length ? `${status.selected_dids.length} 台` : "未选择");
   setText("#coco-base", status.coco_base);
+  setText("#coco-copy", status.coco_base ? "搜索和音源解析在线" : "等待 coco 地址");
   setText("#last-keyword", status.last_keyword || "暂无");
   setText("#last-playback", status.last_playback_at || "暂无");
+  setText("#device-copy", status.devices.length ? `发现 ${status.devices.length} 台设备` : "等待设备同步");
   setText("#delay-sec", `${settings.official_answer_delay_sec}s`);
   setText("#search-tts", settings.search_tts);
   setText("#found-tts", settings.found_tts);
@@ -299,14 +336,17 @@ function renderStatus(payload) {
   if (status.ready) {
     runtimeTitle.textContent = "服务在线";
     runtimeCopy.textContent = "监听语音与后台推送";
-    runtimeDot.style.background = "#15803d";
+    runtimeDot.classList.add("live");
+    runtimeDot.classList.remove("warn");
   } else {
     runtimeTitle.textContent = "启动中";
     runtimeCopy.textContent = status.startup_error || "等待 xiaomusic 就绪";
-    runtimeDot.style.background = "#b45309";
+    runtimeDot.classList.add("warn");
+    runtimeDot.classList.remove("live");
   }
 
   renderOnboarding(status);
+  renderConsoleDevices(status);
   renderAccountState(status);
   renderPlayerSummary(status);
 }
@@ -752,6 +792,14 @@ if (volumeInput) {
     }
   });
 }
+
+document.querySelectorAll(".top-tabs button").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
+
+document.querySelectorAll("[data-jump-tab]").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.jumpTab));
+});
 
 qs("#account-form").addEventListener("submit", async (event) => {
   event.preventDefault();

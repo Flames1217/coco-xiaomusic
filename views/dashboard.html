@@ -4,46 +4,190 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>coco-xiaomusic 控制台</title>
-  <link rel="stylesheet" href="/assets/dashboard.css?v=20260514-r2">
+  <link rel="stylesheet" href="/assets/dashboard.css?v=20260514-tabs">
 </head>
 <body>
-  <main class="ops-shell">
-    <header class="topbar">
+  <main class="app-shell">
+    <header class="app-top">
       <div class="brand">
         <p class="eyebrow">coco-xiaomusic</p>
         <h1>小爱音箱播放控制台</h1>
-        <p class="subtitle">点歌接管、coco 搜索、设备推流与实时状态集中在一个台面。</p>
+        <p class="subtitle">控制台负责点歌、播放、日志与核心状态；账号、设备、策略集中到独立配置页。</p>
       </div>
-      <section class="runtime-card">
-        <span class="runtime-dot"></span>
-        <div>
-          <strong id="runtime-title">启动中</strong>
-          <span id="runtime-copy">等待 xiaomusic 就绪</span>
-        </div>
-      </section>
+      <nav class="top-tabs" aria-label="主导航">
+        <button type="button" class="active" data-tab="console">控制台</button>
+        <button type="button" data-tab="devices">设备</button>
+        <button type="button" data-tab="strategy">策略</button>
+        <button type="button" data-tab="account">账号</button>
+      </nav>
     </header>
 
-    <section class="metric-strip">
-      <article><span>监听设备</span><strong id="device-id">--</strong></article>
-      <article><span>最近口令</span><strong id="last-keyword">暂无</strong></article>
-      <article><span>最近播放</span><strong id="last-playback">暂无</strong></article>
-      <article><span>coco 服务</span><strong id="coco-base">--</strong></article>
+    <section class="status-dock" aria-label="服务状态">
+      <article class="status-card service-card">
+        <span class="status-dot runtime-dot"></span>
+        <div>
+          <span>xiaomusic 服务</span>
+          <strong id="runtime-title">启动中</strong>
+          <p id="runtime-copy">等待 xiaomusic 就绪</p>
+        </div>
+      </article>
+      <article class="status-card service-card">
+        <span class="status-dot live"></span>
+        <div>
+          <span>coco 服务</span>
+          <strong id="coco-base">--</strong>
+          <p id="coco-copy">搜索与解析服务地址</p>
+        </div>
+      </article>
+      <article class="status-card">
+        <span>监听设备</span>
+        <strong id="device-id">--</strong>
+        <p id="device-copy">等待设备同步</p>
+      </article>
+      <article class="status-card">
+        <span>最近口令</span>
+        <strong id="last-keyword">暂无</strong>
+        <p>最近播放：<b id="last-playback">暂无</b></p>
+      </article>
     </section>
 
-    <section class="console-layout">
-      <aside class="panel side-panel">
+    <section class="tab-panel active" id="tab-console">
+      <section class="console-grid">
+        <article class="panel play-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Console</p>
+              <h2>点歌与搜索</h2>
+            </div>
+          </div>
+
+          <form id="play-form" class="search-form">
+            <label>
+              <span>歌曲关键词</span>
+              <input id="keyword" name="keyword" placeholder="例如：宿 廖静媛" autocomplete="off" required>
+            </label>
+            <button type="submit">播放第一条</button>
+            <button class="ghost" id="preview-button" type="button">搜索全部</button>
+          </form>
+
+          <section class="results-board">
+            <div class="results-head">
+              <div>
+                <span class="label">搜索结果</span>
+                <strong id="preview-title">等待搜索</strong>
+                <p id="preview-copy">语音命令默认第一条；前端可以手动推送任意一条。</p>
+              </div>
+            </div>
+            <div class="provider-filter" id="provider-filter" aria-label="渠道筛选"></div>
+            <div class="preview-list" id="preview-list"></div>
+          </section>
+        </article>
+
+        <aside class="console-side">
+          <article class="panel compact-status">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Devices</p>
+                <h2>设备信息</h2>
+              </div>
+              <button type="button" class="ghost compact-button" data-jump-tab="devices">管理设备</button>
+            </div>
+            <div class="console-device-list" id="console-device-list"></div>
+          </article>
+
+          <article class="panel log-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Logs</p>
+                <h2>实时日志</h2>
+              </div>
+              <button type="button" id="clear-events-button" class="ghost compact-button">清理日志</button>
+            </div>
+            <div id="events" class="events"></div>
+          </article>
+        </aside>
+      </section>
+    </section>
+
+    <section class="tab-panel" id="tab-devices">
+      <section class="settings-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">First Run</p>
+              <h2>从 0 到可播放</h2>
+            </div>
+          </div>
+          <div class="step-stack">
+            <article class="step" id="step-account"><span>1</span><div><strong>账号</strong><p id="step-account-copy">等待配置</p></div></article>
+            <article class="step" id="step-token"><span>2</span><div><strong>Token</strong><p id="step-token-copy">等待配置</p></div></article>
+            <article class="step" id="step-device"><span>3</span><div><strong>设备</strong><p id="step-device-copy">等待配置</p></div></article>
+            <article class="step" id="step-ready"><span>4</span><div><strong>服务</strong><p id="step-ready-copy">等待配置</p></div></article>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Device Routing</p>
+              <h2>设备接入</h2>
+              <p>参与语音监听与后台默认推送可以分开配置。</p>
+            </div>
+            <button type="button" id="save-devices-button">保存方案</button>
+          </div>
+          <div class="device-list" id="device-list"></div>
+        </article>
+      </section>
+    </section>
+
+    <section class="tab-panel" id="tab-strategy">
+      <section class="settings-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Voice Flow</p>
+              <h2>当前策略</h2>
+            </div>
+          </div>
+          <dl class="settings-list">
+            <div><dt>静默接管延迟</dt><dd id="delay-sec">--</dd></div>
+            <div><dt>触发关键词</dt><dd id="keywords">--</dd></div>
+            <div><dt>搜索提示</dt><dd id="search-tts">--</dd></div>
+            <div><dt>命中提示</dt><dd id="found-tts">--</dd></div>
+          </dl>
+          <div class="command-row">
+            <span>点歌 七朵组合的咏春</span>
+            <span>点一首 袁艺菲的缺月</span>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Runtime</p>
+              <h2>播放策略配置</h2>
+            </div>
+          </div>
+          <form id="runtime-form" class="stack-form">
+            <label><span>coco 服务地址</span><input name="coco_base" id="runtime-coco-base" required></label>
+            <label><span>静默接管延迟秒数</span><input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required></label>
+            <label><span>搜索提示话术</span><input name="search_tts" id="runtime-search-tts" required></label>
+            <label><span>命中提示话术</span><input name="found_tts" id="runtime-found-tts" required></label>
+            <label><span>失败提示话术</span><input name="error_tts" id="runtime-error-tts" required></label>
+            <button type="submit">保存策略</button>
+          </form>
+        </article>
+      </section>
+    </section>
+
+    <section class="tab-panel" id="tab-account">
+      <article class="panel account-panel">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Setup</p>
-            <h2>账号与设备</h2>
+            <p class="eyebrow">Account</p>
+            <h2>小米账号登录</h2>
+            <p>保存账号后会生成 token 并同步设备列表。登录成功后默认锁定，避免误改。</p>
           </div>
-        </div>
-
-        <div class="step-stack">
-          <article class="step" id="step-account"><span>1</span><div><strong>账号</strong><p id="step-account-copy">等待配置</p></div></article>
-          <article class="step" id="step-token"><span>2</span><div><strong>Token</strong><p id="step-token-copy">等待配置</p></div></article>
-          <article class="step" id="step-device"><span>3</span><div><strong>设备</strong><p id="step-device-copy">等待配置</p></div></article>
-          <article class="step" id="step-ready"><span>4</span><div><strong>服务</strong><p id="step-ready-copy">等待配置</p></div></article>
         </div>
 
         <form id="account-form" class="stack-form">
@@ -55,84 +199,12 @@
 
         <div id="account-locked" class="locked hidden">
           <div><strong>账号已保存</strong><p>避免误改，当前配置已锁定。</p></div>
-          <button type="button" id="edit-account-button" class="ghost">编辑</button>
+          <button type="button" id="edit-account-button" class="ghost">编辑账号</button>
         </div>
-
-        <div class="device-head">
-          <div><strong>设备接入</strong><p>监听与后台推送可分开配置。</p></div>
-          <button type="button" id="save-devices-button">保存方案</button>
-        </div>
-        <div class="device-list" id="device-list"></div>
-      </aside>
-
-      <section class="panel work-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Playback</p>
-            <h2>点歌与播放器</h2>
-          </div>
-        </div>
-
-        <form id="play-form" class="search-form">
-          <label><span>歌曲关键词</span><input id="keyword" name="keyword" placeholder="例如：七朵组合的咏春" autocomplete="off" required></label>
-          <button type="submit">播放第一条</button>
-          <button class="ghost" id="preview-button" type="button">搜索全部</button>
-        </form>
-
-        <section class="results-board">
-          <div class="results-head">
-            <div>
-              <span class="label">搜索结果</span>
-              <strong id="preview-title">等待搜索</strong>
-              <p id="preview-copy">语音命令默认第一条，前端可手动推送任意结果。</p>
-            </div>
-          </div>
-          <div class="provider-filter" id="provider-filter" aria-label="渠道筛选"></div>
-          <div class="preview-list" id="preview-list"></div>
-        </section>
-      </section>
-
-      <section class="panel signal-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Signals</p>
-            <h2>策略与日志</h2>
-          </div>
-        </div>
-
-        <section class="strategy-card">
-          <dl class="settings-list">
-            <div><dt>静默接管延迟</dt><dd id="delay-sec">--</dd></div>
-            <div><dt>触发关键词</dt><dd id="keywords">--</dd></div>
-            <div><dt>搜索提示</dt><dd id="search-tts">--</dd></div>
-            <div><dt>命中提示</dt><dd id="found-tts">--</dd></div>
-          </dl>
-          <div class="command-row">
-            <span>点歌 七朵组合的咏春</span>
-            <span>点一首 袁艺菲的缺月</span>
-          </div>
-        </section>
-
-        <form id="runtime-form" class="runtime-form">
-          <label><span>coco 服务地址</span><input name="coco_base" id="runtime-coco-base" required></label>
-          <label><span>静默接管延迟秒数</span><input name="official_answer_delay_sec" id="runtime-delay" type="number" min="0" step="0.1" required></label>
-          <label><span>搜索提示话术</span><input name="search_tts" id="runtime-search-tts" required></label>
-          <label><span>命中提示话术</span><input name="found_tts" id="runtime-found-tts" required></label>
-          <label><span>失败提示话术</span><input name="error_tts" id="runtime-error-tts" required></label>
-          <button type="submit">保存策略</button>
-        </form>
-
-        <section class="log-board">
-          <div class="results-head">
-            <div><span class="label">实时日志</span><strong>运行事件</strong></div>
-            <button type="button" id="clear-events-button" class="ghost compact-button">清理日志</button>
-          </div>
-          <div id="events" class="events"></div>
-        </section>
-
-        <pre id="action-result">等待操作...</pre>
-      </section>
+      </article>
     </section>
+
+    <pre id="action-result" class="action-result">等待操作...</pre>
   </main>
 
   <aside class="bottom-player" id="bottom-player" aria-label="音乐播放栏">
@@ -176,6 +248,6 @@
     <span class="sr-only" id="player-meta"></span>
   </aside>
 
-  <script src="/assets/dashboard.js?v=20260514-r2"></script>
+  <script src="/assets/dashboard.js?v=20260514-tabs"></script>
 </body>
 </html>
