@@ -16,6 +16,9 @@ music/
 xiaomusic.log.txt
 *.log
 logs/
+build/
+dist/
+*.spec
 *.pid
 *.tmp
 *.bak

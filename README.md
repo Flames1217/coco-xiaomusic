@@ -13,6 +13,7 @@
 - 底部播放器：只有真正推送成功并进入播放态后才浮现，支持暂停、继续、停止、进度跳转和音量调整。
 - 多设备：可选择多台小爱参与语音监听，也可单独指定后台默认推送目标。
 - 从 0 引导：控制台引导用户完成小米账号登录、token 生成、设备识别和最终播放。
+- Windows 桌面应用：可用原生窗口打开控制台，自动启动或复用本地后台服务。
 - Windows 服务：内置原生 Windows 服务脚本，不依赖 NSSM。
 
 ## 前置要求
@@ -34,6 +35,28 @@ python -m pip install -r .\requirements.txt
 `requirements.txt` 只包含 Python 依赖；FFmpeg 是系统依赖，需要单独安装。
 
 ## 启动
+
+### 桌面应用启动
+
+推荐 Windows 用户优先使用桌面入口：
+
+```powershell
+python .\desktop_app.py
+```
+
+或：
+
+```powershell
+.\scripts\run_desktop.ps1
+```
+
+桌面入口会打开一个原生窗口，并自动检查 `127.0.0.1:8088`：
+
+- 如果已有 coco-xiaomusic 服务在运行，会直接复用。
+- 如果没有服务，会在当前进程中启动后台 FastAPI 服务。
+- 关闭窗口时，会自动停止由桌面入口启动的后台服务；如果复用的是 Windows 服务，则不会关闭它。
+
+### Web 控制台启动
 
 ```powershell
 python .\main.py
@@ -108,6 +131,22 @@ python .\windows_service.py remove
 - `data/app_settings.json` 中 `admin_port` 是否仍为 `8088`。
 - 防火墙是否允许局域网访问该端口。
 
+## 打包 Windows 桌面版
+
+如果要生成可分发的 `.exe`，执行：
+
+```powershell
+.\scripts\build_desktop.ps1
+```
+
+生成结果位于：
+
+```text
+dist\coco-xiaomusic\coco-xiaomusic.exe
+```
+
+打包版会把 Python 桌面入口、前端资源和后端代码放进同一个目录。FFmpeg 仍建议放到系统 `PATH`，或者随安装包一起放到项目可识别的位置，例如 `ffmpeg/bin/ffmpeg.exe`。
+
 ## 敏感数据与本地文件
 
 以下路径包含账号、密码、token、设备 DID、缓存、临时 TTS 或日志，不应提交到 Git：
@@ -126,7 +165,8 @@ python .\windows_service.py remove
 ## 项目结构
 
 ```text
-main.py                      唯一普通启动入口
+desktop_app.py               Windows 桌面应用入口
+main.py                      Web 控制台启动入口
 windows_service.py           Windows 服务入口
 coco_xiaomusic/
   coco_client.py             coco-downloader API 封装
@@ -136,6 +176,8 @@ coco_xiaomusic/
 views/dashboard.html         控制台页面
 assets/dashboard.css         控制台样式
 assets/dashboard.js          控制台交互
+scripts/run_desktop.ps1      启动桌面应用
+scripts/build_desktop.ps1    打包桌面应用
 requirements.txt             Python 依赖
 ```
 
