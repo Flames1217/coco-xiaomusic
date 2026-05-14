@@ -544,6 +544,7 @@ class CocoXiaoMusicService:
         self._log("info", f"准备推送音源格式：{suffix}", keyword=keyword, song=song.raw)
 
         self._next_control_version()
+        await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url)
         results = await self._play_url_to_targets(url, [did], song, take_over=False, prepared_url=local_url)
         target = results[0] if results else {"success": False}
         if not target.get("success"):
@@ -581,6 +582,26 @@ class CocoXiaoMusicService:
         raise RuntimeError("ffmpeg not found")
 
     @staticmethod
+    def _find_ffprobe() -> str:
+        candidates = [
+            Path("ffmpeg/bin/ffprobe.exe"),
+            Path("ffprobe.exe"),
+            Path("D:/Best/ffmpeg/bin/ffprobe.exe"),
+            Path("D:/Best/ffmpeg/ffprobe.exe"),
+        ]
+        found = shutil.which("ffprobe")
+        if found:
+            return found
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        ffmpeg = Path(CocoXiaoMusicService._find_ffmpeg())
+        sibling = ffmpeg.with_name("ffprobe.exe")
+        if sibling.exists():
+            return str(sibling)
+        raise RuntimeError("ffprobe not found")
+
+    @staticmethod
     def _song_duration_seconds(raw: dict) -> float:
         value = (
             raw.get("duration")
@@ -607,6 +628,62 @@ class CocoXiaoMusicService:
             return seconds / 1000 if seconds > 10000 else seconds
         except ValueError:
             return 0.0
+
+    @staticmethod
+    def _apply_song_duration(song: CocoSong, seconds: float):
+        if seconds <= 0:
+            return
+        song.duration = seconds
+        if song.raw is not None:
+            song.raw["duration"] = seconds
+
+    def _probe_duration_seconds(self, url: str, timeout: int = 12) -> float:
+        headers = "\r\n".join(
+            [
+                "User-Agent: Mozilla/5.0",
+                "Accept: */*",
+                f"Referer: {self.settings.coco_base.rstrip('/')}/",
+                f"Origin: {self.settings.coco_base.rstrip('/')}",
+                "",
+            ]
+        )
+        command = [
+            self._find_ffprobe(),
+            "-v",
+            "error",
+            "-headers",
+            headers,
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            url,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return 0.0
+        for line in completed.stdout.splitlines():
+            try:
+                seconds = float(line.strip())
+            except ValueError:
+                continue
+            if seconds > 0:
+                return seconds
+        return 0.0
+
+    def _resolve_song_duration(self, song: CocoSong, url: str, timeout: int = 12) -> float:
+        duration = self._song_duration_seconds(song.raw or {})
+        if duration <= 0:
+            duration = self._probe_duration_seconds(url, timeout=timeout)
+        self._apply_song_duration(song, duration)
+        return duration
 
     def _current_position_seconds(self) -> float:
         if self.state.playback_paused:
@@ -802,6 +879,12 @@ class CocoXiaoMusicService:
         enrich_count = min(len(songs), 80)
         enrich_tasks = [loop.run_in_executor(None, self.coco.resolve_info, song) for song in songs[:enrich_count]]
         enrich_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+        duration_tasks = []
+        for song, result in zip(songs[: min(enrich_count, 8)], enrich_results[:8]):
+            if isinstance(result, dict) and result.get("url") and self._song_duration_seconds(song.raw or {}) <= 0:
+                duration_tasks.append(loop.run_in_executor(None, self._resolve_song_duration, song, result["url"], 6))
+        if duration_tasks:
+            await asyncio.gather(*duration_tasks, return_exceptions=True)
         preview = []
         for index, song in enumerate(songs):
             has_url = None
@@ -857,6 +940,44 @@ class CocoXiaoMusicService:
                 song=song.raw,
             )
         return results
+
+    async def _resolve_selected_url_with_fallback(self, song: CocoSong) -> tuple[CocoSong, str | None, str]:
+        loop = asyncio.get_running_loop()
+        try:
+            url = await loop.run_in_executor(None, self.coco.resolve_url, song)
+            if url:
+                return song, url, ""
+        except Exception as exc:
+            first_error = repr(exc)
+        else:
+            first_error = "no url"
+
+        title_key = self._compact_text(song.title)
+        artist_key = self._compact_text(song.artist)
+        query = f"{song.artist}的{song.title}" if song.artist else song.title
+        ranked = await self._collect_ranked_songs(query)
+        for _, candidate, _ in ranked[:80]:
+            if candidate.provider == song.provider and candidate.id == song.id:
+                continue
+            candidate_title = self._compact_text(candidate.title)
+            candidate_artist = self._compact_text(candidate.artist)
+            if title_key and title_key not in candidate_title and candidate_title not in title_key:
+                continue
+            if artist_key and candidate_artist and artist_key not in candidate_artist and candidate_artist not in artist_key:
+                continue
+            try:
+                url = await loop.run_in_executor(None, self.coco.resolve_url, candidate)
+            except Exception as exc:
+                self._log("warn", f"同曲兜底解析失败：{candidate.title} - {candidate.artist} [{candidate.provider}] {exc!r}", song=candidate.raw)
+                continue
+            if url:
+                self._log(
+                    "warn",
+                    f"指定渠道不可用，已切到同曲渠道：{candidate.title} - {candidate.artist} [{candidate.provider}]",
+                    song=candidate.raw,
+                )
+                return candidate, url, first_error
+        return song, None, first_error
 
     async def _poll_player_status(self, did: str, max_tries: int = 3, assume_playing: bool = False):
         status = {}
@@ -990,18 +1111,14 @@ class CocoXiaoMusicService:
                 "bitrate": bitrate,
             },
         )
-        try:
-            url = await asyncio.get_running_loop().run_in_executor(None, self.coco.resolve_url, song)
-        except Exception as exc:
-            self.state.last_error = str(exc)
-            self._log("error", f"指定歌曲解析失败：{exc!r}", song=song.raw)
-            return {"success": False, "error": str(exc)}
+        song, url, first_error = await self._resolve_selected_url_with_fallback(song)
         if not url:
-            self.state.last_error = "selected song has no url"
-            self._log("error", f"指定歌曲没有直链：{title} - {artist} [{provider}]", song=song.raw)
-            return {"success": False, "error": "selected song has no url"}
+            self.state.last_error = first_error or "selected song has no url"
+            self._log("error", f"指定歌曲解析失败，且同曲兜底不可用：{title} - {artist} [{provider}]", song=song.raw)
+            return {"success": False, "error": self.state.last_error}
 
         self._next_control_version()
+        await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url)
         results = await self._play_url_to_targets(url, target_dids, song)
         if not any(item["success"] for item in results):
             return {"success": False, "error": "all target devices failed", "targets": results}
