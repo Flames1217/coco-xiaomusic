@@ -1,10 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 root = Path(SPECPATH).parents[1]
 
-datas = []
+datas = [
+    (str(root / "assets"), "assets"),
+]
+datas += collect_data_files("customtkinter")
 
 hiddenimports = [
     "uvicorn.logging",
@@ -46,6 +50,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon=str(root / "assets" / "logo.ico"),
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

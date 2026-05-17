@@ -8,6 +8,7 @@ AppId={{6E7406D1-BE4D-4A46-8F8E-4F94E96E0F2C}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+SetupIconFile=..\..\assets\logo.ico
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

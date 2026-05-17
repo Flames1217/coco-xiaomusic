@@ -3,6 +3,7 @@ uvicorn>=0.34
 python-multipart>=0.0.20
 requests>=2.32
 rich>=13.9
+customtkinter>=5.2.2
 xiaomusic>=0.5.3
 pypinyin>=0.51
 edge-tts>=7.0
