@@ -98,6 +98,29 @@ class CocoXiaoMusicService:
         }
         return table.get((provider or "").lower(), 50)
 
+    @staticmethod
+    def _expand_provider_filters(providers: list[str] | None) -> set[str]:
+        aliases = {
+            "geba": {"geba", "songbao", "gqb"},
+            "gequhai": {"gequhai"},
+            "bugu": {"bugu", "bilibili"},
+            "qq": {"qq"},
+            "qqmp3": {"qqmp3"},
+            "migu": {"migu"},
+            "liyin": {"liyin", "fangyin", "livepoo"},
+            "jianbin-netease": {"jianbin-netease", "jianbing-netease", "jianbin-wangyi", "jianbing-wangyi", "netease"},
+            "jianbin-qq": {"jianbin-qq", "jianbing-qq"},
+            "jianbin-kugou": {"jianbin-kugou", "jianbing-kugou", "kugou"},
+            "jianbin-kuwo": {"jianbin-kuwo", "jianbing-kuwo", "kuwo"},
+        }
+        expanded: set[str] = set()
+        for provider in providers or []:
+            provider_key = str(provider).strip().lower()
+            if not provider_key:
+                continue
+            expanded.update(aliases.get(provider_key, {provider_key}))
+        return expanded
+
     def _log(self, level: str, message: str, keyword: str = "", song: dict | None = None):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         repaired_message = repair_text(message)
@@ -1090,7 +1113,7 @@ class CocoXiaoMusicService:
 
     async def search_preview(self, keyword: str, providers: list[str] | None = None):
         songs = await asyncio.get_running_loop().run_in_executor(None, self.coco.search_items, keyword, None)
-        allowed_providers = {str(provider).strip().lower() for provider in providers or [] if str(provider).strip()}
+        allowed_providers = self._expand_provider_filters(providers)
         if allowed_providers:
             songs = [song for song in songs if (song.provider or "").lower() in allowed_providers]
         loop = asyncio.get_running_loop()

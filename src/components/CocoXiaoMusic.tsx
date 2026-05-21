@@ -86,7 +86,53 @@ type ActionResult = { success?: boolean; error?: string; [key: string]: unknown 
 type SearchFeedback = { tone: "info" | "success" | "warn" | "error"; message: string };
 
 const playlistStorageKey = "coco-playlist";
-const presetProviders = ["qq", "netease", "kugou", "kuwo", "migu", "gequhai", "bilibili"];
+const presetProviders = [
+  { id: "geba", label: "歌曲宝" },
+  { id: "gequhai", label: "歌曲海" },
+  { id: "bugu", label: "布谷" },
+  { id: "qq", label: "QQ音乐" },
+  { id: "qqmp3", label: "QQMP3" },
+  { id: "migu", label: "咪咕" },
+  { id: "liyin", label: "力音" },
+  { id: "jianbin-netease", label: "煎饼-网易" },
+  { id: "jianbin-qq", label: "煎饼-qq" },
+  { id: "jianbin-kugou", label: "煎饼-酷狗" },
+  { id: "jianbin-kuwo", label: "煎饼-酷我" }
+];
+
+const providerLabels: Record<string, string> = {
+  geba: "歌曲宝",
+  songbao: "歌曲宝",
+  gqb: "歌曲宝",
+  gequhai: "歌曲海",
+  bugu: "布谷",
+  bilibili: "布谷",
+  qq: "QQ音乐",
+  qqmp3: "QQMP3",
+  migu: "咪咕",
+  liyin: "力音",
+  fangyin: "力音",
+  livepoo: "力音",
+  netease: "煎饼-网易",
+  "jianbin-netease": "煎饼-网易",
+  "jianbing-netease": "煎饼-网易",
+  "jianbin-wangyi": "煎饼-网易",
+  "jianbing-wangyi": "煎饼-网易",
+  "jianbin-qq": "煎饼-qq",
+  "jianbing-qq": "煎饼-qq",
+  kugou: "煎饼-酷狗",
+  "jianbin-kugou": "煎饼-酷狗",
+  "jianbing-kugou": "煎饼-酷狗",
+  kuwo: "煎饼-酷我",
+  "jianbin-kuwo": "煎饼-酷我",
+  "jianbing-kuwo": "煎饼-酷我",
+  coco: "coco"
+};
+
+function providerLabel(provider: string | undefined) {
+  const value = String(provider || "coco").trim();
+  return providerLabels[value.toLowerCase()] || value;
+}
 
 const defaultKeywords = ["播放", "放一首", "来一首", "唱", "coco"];
 
@@ -1029,17 +1075,17 @@ export default function CocoXiaoMusic() {
                 </button>
                 {presetProviders.map((provider) => (
                   <button
-                    key={provider}
+                    key={provider.id}
                     type="button"
-                    onClick={() => toggleSearchProvider(provider)}
+                    onClick={() => toggleSearchProvider(provider.id)}
                     className={cn(
                       "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
-                      selectedProviders.has(provider)
+                      selectedProviders.has(provider.id)
                         ? "bg-violet-500 text-white"
                         : "bg-muted text-zinc-500 hover:text-foreground"
                     )}
                   >
-                    {provider}
+                    {provider.label}
                   </button>
                 ))}
               </div>
@@ -1093,7 +1139,7 @@ export default function CocoXiaoMusic() {
                           : "bg-muted text-zinc-500 hover:text-foreground"
                       )}
                     >
-                      {provider} <span className="font-mono">{count}</span>
+                      {providerLabel(provider)} <span className="font-mono">{count}</span>
                     </button>
                   ))}
                 </div>
@@ -1142,7 +1188,7 @@ export default function CocoXiaoMusic() {
                       <Badge variant="secondary">{durationText(result.item.duration)}</Badge>
                     </div>
                     <div className="flex justify-center">
-                      <Badge variant="outline">{result.item.provider || "coco"}</Badge>
+                      <Badge variant="outline">{providerLabel(result.item.provider)}</Badge>
                     </div>
                     <div className="flex justify-end gap-1">
                       {playlistKeys.has(songKey(result.item)) ? (
