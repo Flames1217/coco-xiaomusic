@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import xiaomusic.xiaomusic as xm_module
+import requests
 from pypinyin import Style, lazy_pinyin
 from rich.console import Console
 from xiaomusic.command_handler import CommandHandler
@@ -1623,12 +1624,20 @@ class CocoXiaoMusicService:
 
     async def test_coco_connection(self, coco_base: str):
         base = coco_base.strip() or self.settings.coco_base
-        client = CocoClient(base)
+        if not base:
+            return {"success": False, "error": "empty coco service url"}
+
+        def request_home():
+            response = requests.get(base, timeout=3, allow_redirects=True)
+            return response.status_code
+
         try:
-            songs = await asyncio.get_running_loop().run_in_executor(None, client.search_items, "test", 1)
+            status_code = await asyncio.get_running_loop().run_in_executor(None, request_home)
         except Exception as exc:
             return {"success": False, "error": repr(exc)}
-        return {"success": True, "items": len(songs), "coco_base": base}
+        if status_code != 200:
+            return {"success": False, "error": f"HTTP {status_code}", "status": status_code, "coco_base": base}
+        return {"success": True, "status": status_code, "coco_base": base}
 
     async def rename_device(self, did: str, alias: str):
         did = did.strip()

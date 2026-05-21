@@ -526,8 +526,8 @@ pub fn run() {
                 prepare_home().map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
             WebviewWindowBuilder::new(app.handle(), "main", WebviewUrl::App("index.html".into()))
                 .title("coco-xiaomusic")
-                .inner_size(1320.0, 840.0)
-                .min_inner_size(1100.0, 720.0)
+                .inner_size(1480.0, 840.0)
+                .min_inner_size(1180.0, 720.0)
                 .data_directory(home.join("webview"))
                 .build()?;
 

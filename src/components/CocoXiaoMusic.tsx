@@ -82,16 +82,241 @@ type Language = "zh" | "en";
 type TakeoverMode = "keyword" | "all" | "off";
 type ActionResult = { success?: boolean; error?: string; [key: string]: unknown };
 
-const navItems: Array<{ id: NavItem; icon: typeof Home; label: string }> = [
-  { id: "overview", icon: Home, label: "概览" },
-  { id: "search", icon: Search, label: "搜索与推送" },
-  { id: "devices", icon: Radio, label: "设备管理" },
-  { id: "logs", icon: ScrollText, label: "实时日志" },
-  { id: "settings", icon: Settings, label: "策略设置" },
-  { id: "account", icon: ShieldAlert, label: "账号授权" }
-];
-
 const defaultKeywords = ["播放", "放一首", "来一首", "唱", "coco"];
+
+const text = {
+  zh: {
+    nav: {
+      overview: "概览",
+      search: "搜索与推送",
+      devices: "设备管理",
+      logs: "实时日志",
+      settings: "策略设置",
+      account: "账号授权"
+    },
+    status: {
+      online: "在线",
+      starting: "启动中",
+      pending: "待处理",
+      offline: "离线",
+      connected: "已连接",
+      connecting: "连接中",
+      noDevice: "未选择设备",
+      listening: "监听中",
+      notListening: "未监听",
+      running: "已运行"
+    },
+    action: {
+      refresh: "刷新",
+      switchDevice: "切换设备",
+      playBest: "播放首选",
+      search: "搜索",
+      push: "推送",
+      refreshDevices: "刷新设备",
+      saveDevices: "保存设备",
+      all: "全部",
+      autoScroll: "自动滚动",
+      clear: "清空",
+      test: "测试连接",
+      add: "添加",
+      saveStrategy: "保存策略",
+      openVerify: "打开验证链接",
+      copy: "复制链接",
+      verifiedRefresh: "我已验证，刷新设备",
+      logout: "退出登录",
+      saveLogin: "保存并登录",
+      ok: "确定"
+    },
+    label: {
+      backend: "后台服务",
+      xiaoMusic: "XiaoMusic",
+      devices: "设备",
+      cocoService: "coco 服务",
+      recentCommand: "最近口令",
+      recentPush: "最近推送",
+      recentActivity: "最近活动",
+      todayPushes: "今日推送次数",
+      voiceHits: "语音命中次数",
+      uptime: "服务运行时长",
+      discoveredDevices: "已发现设备",
+      serviceConfig: "服务配置",
+      cocoBase: "coco 服务地址",
+      streamPort: "MP3 流服务端口",
+      answerDelay: "官方回答延迟秒数",
+      takeover: "语音接管",
+      takeoverMode: "接管策略",
+      keywords: "接管关键词",
+      searchTts: "搜索提示话术",
+      foundTts: "命中提示话术",
+      errorTts: "失败提示话术",
+      miVerify: "小米账号需要安全验证",
+      miAccount: "小米账号",
+      account: "账号",
+      password: "密码",
+      host: "本机访问地址",
+      listen: "监听",
+      push: "推送",
+      defaultPush: "设为默认推送",
+      saveAlias: "保存别名",
+      rename: "命名",
+      pushTo: "推送至"
+    },
+    empty: {
+      noSong: "暂无歌曲",
+      noCommand: "暂无",
+      noPush: "暂无推送记录",
+      noActivity: "暂无活动",
+      noSearch: "暂无搜索结果",
+      noLog: "暂无日志",
+      noDevice: "暂无设备。完成小米安全验证后点击“刷新设备”。",
+      unnamedDevice: "未命名设备"
+    },
+    placeholder: {
+      search: "搜索歌曲、歌手或语音口令",
+      keyword: "新增关键词",
+      alias: "本地别名"
+    },
+    mode: {
+      keyword: "仅关键词接管",
+      all: "全部口令接管",
+      off: "关闭接管"
+    },
+    message: {
+      connecting: "正在连接后台服务...",
+      verify: "小米账号需要安全验证，请到账号授权页处理",
+      online: "服务在线",
+      waiting: "等待账号或设备配置",
+      copied: "验证链接已复制",
+      noDeviceToAdd: "当前没有可添加的设备，请先刷新设备"
+    },
+    dialog: {
+      cocoOk: "coco 服务连接成功",
+      cocoFail: "coco 服务连接失败",
+      statusCode: "HTTP 状态码",
+      address: "地址"
+    }
+  },
+  en: {
+    nav: {
+      overview: "Overview",
+      search: "Search & Push",
+      devices: "Devices",
+      logs: "Live Logs",
+      settings: "Strategy",
+      account: "Account"
+    },
+    status: {
+      online: "Online",
+      starting: "Starting",
+      pending: "Action needed",
+      offline: "Offline",
+      connected: "Connected",
+      connecting: "Connecting",
+      noDevice: "No device selected",
+      listening: "Listening",
+      notListening: "Not listening",
+      running: "Running"
+    },
+    action: {
+      refresh: "Refresh",
+      switchDevice: "Switch device",
+      playBest: "Play best",
+      search: "Search",
+      push: "Push",
+      refreshDevices: "Refresh devices",
+      saveDevices: "Save devices",
+      all: "All",
+      autoScroll: "Auto scroll",
+      clear: "Clear",
+      test: "Test",
+      add: "Add",
+      saveStrategy: "Save strategy",
+      openVerify: "Open verification",
+      copy: "Copy link",
+      verifiedRefresh: "Verified, refresh devices",
+      logout: "Log out",
+      saveLogin: "Save & sign in",
+      ok: "OK"
+    },
+    label: {
+      backend: "Backend service: ",
+      xiaoMusic: "XiaoMusic",
+      devices: "Devices",
+      cocoService: "coco Service",
+      recentCommand: "Last command",
+      recentPush: "Recent pushes",
+      recentActivity: "Recent activity",
+      todayPushes: "Pushes today",
+      voiceHits: "Voice hits",
+      uptime: "Service uptime",
+      discoveredDevices: "Discovered devices",
+      serviceConfig: "Service config",
+      cocoBase: "coco service URL",
+      streamPort: "MP3 stream port",
+      answerDelay: "Official answer delay",
+      takeover: "Voice takeover",
+      takeoverMode: "Takeover mode",
+      keywords: "Takeover keywords",
+      searchTts: "Searching prompt",
+      foundTts: "Found prompt",
+      errorTts: "Error prompt",
+      miVerify: "Xiaomi account verification required",
+      miAccount: "Xiaomi account",
+      account: "Account",
+      password: "Password",
+      host: "Local access address",
+      listen: "Listen",
+      push: "Push",
+      defaultPush: "Set as default",
+      saveAlias: "Save alias",
+      rename: "Rename",
+      pushTo: "Push to"
+    },
+    empty: {
+      noSong: "No song",
+      noCommand: "None",
+      noPush: "No push history",
+      noActivity: "No activity",
+      noSearch: "No search results",
+      noLog: "No logs",
+      noDevice: "No devices. Finish Xiaomi verification, then click Refresh devices.",
+      unnamedDevice: "Unnamed device"
+    },
+    placeholder: {
+      search: "Search song, artist, or voice command",
+      keyword: "Add keyword",
+      alias: "Local alias"
+    },
+    mode: {
+      keyword: "Keyword only",
+      all: "All commands",
+      off: "Off"
+    },
+    message: {
+      connecting: "Connecting to backend service...",
+      verify: "Xiaomi account verification is required. Open the Account page.",
+      online: "Service online",
+      waiting: "Waiting for account or device config",
+      copied: "Verification link copied",
+      noDeviceToAdd: "No device to add. Refresh devices first."
+    },
+    dialog: {
+      cocoOk: "coco service connected",
+      cocoFail: "coco service failed",
+      statusCode: "HTTP status",
+      address: "URL"
+    }
+  }
+} as const;
+
+const navItems: Array<{ id: NavItem; icon: typeof Home }> = [
+  { id: "overview", icon: Home },
+  { id: "search", icon: Search },
+  { id: "devices", icon: Radio },
+  { id: "logs", icon: ScrollText },
+  { id: "settings", icon: Settings },
+  { id: "account", icon: ShieldAlert }
+];
 
 function extractFirstUrl(value: string | undefined): string {
   const match = String(value ?? "").match(/https?:\/\/\S+/);
@@ -125,10 +350,6 @@ function levelTone(level: string) {
   return "bg-blue-500/15 text-blue-500 border-blue-500/20";
 }
 
-function songTitle(song: Song | null | undefined): string {
-  return song?.title || "暂无歌曲";
-}
-
 function songArtist(song: Song | null | undefined): string {
   return song?.artist || "--";
 }
@@ -136,14 +357,16 @@ function songArtist(song: Song | null | undefined): string {
 export default function CocoXiaoMusic() {
   const [activeNav, setActiveNav] = useState<NavItem>("overview");
   const [theme, setTheme] = useState<Theme>("light");
-  const [language, setLanguage] = useState<Language>("zh");
+  const [language, setLanguage] = useState<Language>(() => (localStorage.getItem("coco-language") === "en" ? "en" : "zh"));
+  const t = text[language];
   const [status, setStatus] = useState<AppStatus>({});
   const [events, setEvents] = useState<EventItem[]>([]);
   const [results, setResults] = useState<SearchItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState("正在连接后台服务...");
+  const [toast, setToast] = useState<string>(t.message.connecting);
+  const [dialog, setDialog] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [volume, setLocalVolume] = useState(50);
@@ -173,15 +396,15 @@ export default function CocoXiaoMusic() {
   const duration = Number(status.last_duration ?? 0);
   const position = Number(status.last_position ?? 0);
   const verificationUrl = extractFirstUrl(status.startup_error || toast);
-  const readyLabel = status.ready ? "在线" : status.starting ? "启动中" : status.startup_error ? "待处理" : "离线";
+  const readyLabel = status.ready ? t.status.online : status.starting ? t.status.starting : status.startup_error ? t.status.pending : t.status.offline;
   const activeDeviceName =
-    devices.find((device) => manualTargetDids.has(device.did))?.name || devices[0]?.name || "未选择设备";
+    devices.find((device) => manualTargetDids.has(device.did))?.name || devices[0]?.name || t.status.noDevice;
   const targetDevice = devices.find((device) => manualTargetDids.has(device.did)) || devices[0];
   const today = new Date().toISOString().slice(0, 10);
   const todayPushes = events.filter((event) => event.at?.startsWith(today) && Boolean(event.song)).length;
   const voiceHits = events.filter((event) => event.keyword || event.message.includes("语音") || event.message.includes("关键词")).length;
   const firstEventTime = events.at(-1)?.at;
-  const serviceUptime = firstEventTime ? "已运行" : "--";
+  const serviceUptime = firstEventTime ? t.status.running : "--";
 
   const filteredLogs = useMemo(() => {
     return events.filter((event) => logFilter === "all" || levelLabel(event.level).toLowerCase() === logFilter);
@@ -243,6 +466,15 @@ export default function CocoXiaoMusic() {
     formsHydrated.current = true;
   }
 
+  function switchLanguage(next: Language) {
+    setLanguage(next);
+    localStorage.setItem("coco-language", next);
+  }
+
+  function showDialog(title: string, message: string, tone: "success" | "error" = "success") {
+    setDialog({ title, message, tone });
+  }
+
   async function refresh(forceHydrate = false) {
     try {
       const [nextStatus, nextEvents] = await Promise.all([getStatus(), getEvents(180)]);
@@ -252,8 +484,8 @@ export default function CocoXiaoMusic() {
       const startupError = nextStatus.startup_error || "";
       setToast(
         extractFirstUrl(startupError)
-          ? "小米账号需要安全验证，请到账号授权页处理"
-          : startupError || (nextStatus.ready ? "服务在线" : "等待账号或设备配置")
+          ? t.message.verify
+          : startupError || (nextStatus.ready ? t.message.online : t.message.waiting)
       );
     } catch (error) {
       setToast(String(error));
@@ -287,7 +519,7 @@ export default function CocoXiaoMusic() {
     refresh(true);
     const timer = window.setInterval(() => refresh(false), 1200);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [language]);
 
   async function doSearch() {
     const keyword = query.trim();
@@ -347,7 +579,26 @@ export default function CocoXiaoMusic() {
   }
 
   async function testCoco() {
-    await run(() => testCocoConnection(cocoBase), "coco 服务连接正常");
+    setBusy(true);
+    try {
+      const result = (await testCocoConnection(cocoBase)) as ActionResult & { status?: number; coco_base?: string };
+      if (result.success === false) {
+        showDialog(t.dialog.cocoFail, String(result.error ?? "HTTP status is not 200"), "error");
+        setToast(String(result.error ?? t.dialog.cocoFail));
+        return;
+      }
+      showDialog(
+        t.dialog.cocoOk,
+        `${t.dialog.address}: ${String(result.coco_base ?? cocoBase)}\n${t.dialog.statusCode}: ${String(result.status ?? 200)}`,
+        "success"
+      );
+      setToast(t.dialog.cocoOk);
+    } catch (error) {
+      showDialog(t.dialog.cocoFail, String(error), "error");
+      setToast(String(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function logoutAccount() {
@@ -358,7 +609,7 @@ export default function CocoXiaoMusic() {
 
   async function addCurrentDeviceAsTarget() {
     if (!targetDevice) {
-      setToast("当前没有可添加的设备，请先刷新设备");
+      setToast(t.message.noDeviceToAdd);
       return;
     }
     const nextSelected = new Set(selectedDids);
@@ -373,7 +624,7 @@ export default function CocoXiaoMusic() {
   async function copyVerificationUrl() {
     if (!verificationUrl) return;
     await navigator.clipboard.writeText(verificationUrl);
-    setToast("验证链接已复制");
+    setToast(t.message.copied);
   }
 
   return (
@@ -411,7 +662,7 @@ export default function CocoXiaoMusic() {
                     )}
                   >
                     <Icon className="h-4 w-4" />
-                    {item.label}
+                    {t.nav[item.id]}
                   </button>
                 </li>
               );
@@ -421,8 +672,8 @@ export default function CocoXiaoMusic() {
 
         <div className="border-t border-border px-4 py-3">
           <div className="mb-2 flex items-center gap-2">
-            <div className={cn("h-2 w-2 rounded-full", status.sidecar_ready ? "bg-emerald-500 pulse-dot" : "bg-amber-500")} />
-            <span className="text-[12px] text-zinc-500">后台服务{status.sidecar_ready ? "已连接" : "连接中"}</span>
+            <div className={cn("h-2.5 w-2.5 rounded-full", status.sidecar_ready ? "bg-emerald-500 pulse-dot" : "bg-amber-500")} />
+            <span className="text-[12px] text-zinc-500">{t.label.backend}{status.sidecar_ready ? t.status.connected : t.status.connecting}</span>
           </div>
           <div className="text-[11px] text-zinc-600">XiaoMusic: {readyLabel}</div>
         </div>
@@ -437,13 +688,13 @@ export default function CocoXiaoMusic() {
           <div className="flex items-center gap-2">
             <div className="flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium">
               <button
-                onClick={() => setLanguage("zh")}
+                onClick={() => switchLanguage("zh")}
                 className={cn("h-7 rounded-full px-2.5", language === "zh" ? "bg-violet-500 text-white" : "text-zinc-500")}
               >
                 中
               </button>
               <button
-                onClick={() => setLanguage("en")}
+                onClick={() => switchLanguage("en")}
                 className={cn("h-7 rounded-full px-2.5", language === "en" ? "bg-violet-500 text-white" : "text-zinc-500")}
               >
                 EN
@@ -451,7 +702,7 @@ export default function CocoXiaoMusic() {
             </div>
             <Button variant="secondary" size="sm" onClick={() => refresh(true)}>
               <RefreshCw className="h-3.5 w-3.5" />
-              刷新
+              {t.action.refresh}
             </Button>
             <Button variant="secondary" size="icon-sm" onClick={() => setTheme(isDark ? "light" : "dark")}>
               {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -459,34 +710,34 @@ export default function CocoXiaoMusic() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 pb-24">
+        <main className="flex-1 overflow-y-auto p-6 pb-32">
           {activeNav === "overview" && (
             <div className="space-y-5">
               <section className="flex items-center justify-between rounded-[10px] border border-border bg-card px-4 py-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <Speaker className="h-5 w-5 shrink-0 text-zinc-400" />
-                  <span className="truncate text-[13px] font-medium">{targetDevice?.name || "未选择设备"}</span>
+                  <span className="truncate text-[13px] font-medium">{targetDevice?.name || t.status.noDevice}</span>
                   <Badge variant="secondary" className="gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {selectedDids.size > 0 ? "监听中" : "未监听"}
+                    {selectedDids.size > 0 ? t.status.listening : t.status.notListening}
                   </Badge>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setActiveNav("devices")}>
-                  切换设备
+                  {t.action.switchDevice}
                 </Button>
               </section>
 
               <section className="grid grid-cols-4 gap-3">
                 <Metric title="XiaoMusic" value={readyLabel} icon={<Speaker />} />
-                <Metric title="设备" value={`${devices.length} 台`} icon={<Radio />} />
-                <Metric title="coco 服务" value={status.coco_base || cocoBase || "--"} icon={<Music2 />} />
-                <Metric title="最近口令" value={status.last_keyword || "暂无"} icon={<Send />} />
+                <Metric title={t.label.devices} value={language === "zh" ? `${devices.length} 台` : String(devices.length)} icon={<Radio />} />
+                <Metric title={t.label.cocoService} value={status.coco_base || cocoBase || "--"} icon={<Music2 />} />
+                <Metric title={t.label.recentCommand} value={status.last_keyword || t.empty.noCommand} icon={<Send />} />
               </section>
 
               <section className="grid grid-cols-[minmax(0,1fr)_360px] gap-4">
                 <Card className="gap-0 rounded-[10px] py-0">
                   <CardHeader className="px-4 py-4">
-                    <CardTitle className="text-[15px]">最近推送</CardTitle>
+                    <CardTitle className="text-[15px]">{t.label.recentPush}</CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <div className="grid grid-cols-2 gap-3">
@@ -501,30 +752,30 @@ export default function CocoXiaoMusic() {
                           </div>
                         </div>
                       ))}
-                      {recentSongs.length === 0 && <Empty className="col-span-2">暂无推送记录</Empty>}
+                      {recentSongs.length === 0 && <Empty className="col-span-2">{t.empty.noPush}</Empty>}
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className="gap-0 rounded-[10px] py-0">
                   <CardHeader className="px-4 py-4">
-                    <CardTitle className="text-[15px]">最近活动</CardTitle>
+                    <CardTitle className="text-[15px]">{t.label.recentActivity}</CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     <div className="space-y-2">
                       {events.slice(0, 5).map((event, index) => (
                         <LogLine key={`${event.at}-${index}`} event={event} compact />
                       ))}
-                      {events.length === 0 && <Empty>暂无活动</Empty>}
+                      {events.length === 0 && <Empty>{t.empty.noActivity}</Empty>}
                     </div>
                   </CardContent>
                 </Card>
               </section>
 
               <section className="grid grid-cols-3 gap-3">
-                <Metric title="今日推送次数" value={String(todayPushes)} icon={<Send />} />
-                <Metric title="语音命中次数" value={String(voiceHits)} icon={<Activity />} />
-                <Metric title="服务运行时长" value={serviceUptime} icon={<Clock />} />
+                <Metric title={t.label.todayPushes} value={String(todayPushes)} icon={<Send />} />
+                <Metric title={t.label.voiceHits} value={String(voiceHits)} icon={<Activity />} />
+                <Metric title={t.label.uptime} value={serviceUptime} icon={<Clock />} />
               </section>
             </div>
           )}
@@ -537,21 +788,21 @@ export default function CocoXiaoMusic() {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => event.key === "Enter" && doSearch()}
-                  placeholder="搜索歌曲、歌手或语音口令"
+                  placeholder={t.placeholder.search}
                   className="h-11 rounded-[10px] pl-11 pr-48 text-[13px]"
                 />
                 <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-2">
                   <Button onClick={doPlayKeyword} disabled={busy || !query.trim()} size="sm">
-                    播放首选
+                    {t.action.playBest}
                   </Button>
                   <Button onClick={doSearch} disabled={busy || !query.trim()} variant="secondary" size="sm">
-                    搜索
+                    {t.action.search}
                   </Button>
                 </div>
               </div>
 
               <div className="overflow-hidden rounded-[10px] border border-border bg-card">
-                {results.length === 0 && <Empty className="p-8">暂无搜索结果</Empty>}
+                {results.length === 0 && <Empty className="p-8">{t.empty.noSearch}</Empty>}
                 {results.map((result, index) => (
                   <button
                     key={`${result.item.provider}-${result.item.id}-${index}`}
@@ -577,7 +828,7 @@ export default function CocoXiaoMusic() {
                       }}
                       className="opacity-0 group-hover:opacity-100"
                     >
-                      推送
+                      {t.action.push}
                     </Button>
                   </button>
                 ))}
@@ -589,17 +840,17 @@ export default function CocoXiaoMusic() {
             <div>
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-[15px] font-semibold">已发现设备</h2>
+                  <h2 className="text-[15px] font-semibold">{t.label.discoveredDevices}</h2>
                   <Badge variant="secondary">{devices.length}</Badge>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="secondary" onClick={() => run(() => refreshDevices(), "已刷新设备")} disabled={busy}>
                     <RefreshCw className="h-3.5 w-3.5" />
-                    刷新设备
+                    {t.action.refreshDevices}
                   </Button>
                   <Button onClick={() => run(() => saveDevices([...selectedDids], [...manualTargetDids]), "设备设置已保存")} disabled={busy || devices.length === 0}>
                     <Save className="h-3.5 w-3.5" />
-                    保存设备
+                    {t.action.saveDevices}
                   </Button>
                 </div>
               </div>
@@ -619,6 +870,7 @@ export default function CocoXiaoMusic() {
                       setSelectedDids(new Set([device.did]));
                       setManualTargetDids(new Set([device.did]));
                     }}
+                    uiText={t}
                   />
                 ))}
                 <button
@@ -626,9 +878,9 @@ export default function CocoXiaoMusic() {
                   className="flex h-16 w-full items-center justify-center gap-2 rounded-[10px] border border-dashed border-border text-[13px] text-zinc-500 transition-colors hover:border-violet-500/30 hover:text-violet-500"
                 >
                   <Plus className="h-4 w-4" />
-                  添加设备
+                  {t.action.add}{t.label.devices}
                 </button>
-                {devices.length === 0 && <Empty className="rounded-[10px] border border-dashed border-border p-8">暂无设备。完成小米安全验证后点击“刷新设备”。</Empty>}
+                {devices.length === 0 && <Empty className="rounded-[10px] border border-dashed border-border p-8">{t.empty.noDevice}</Empty>}
               </div>
             </div>
           )}
@@ -639,18 +891,18 @@ export default function CocoXiaoMusic() {
                 <div className="flex gap-1">
                   {(["all", "info", "ok", "warn", "error"] as LogFilter[]).map((level) => (
                     <Button key={level} variant={logFilter === level ? "default" : "ghost"} size="sm" onClick={() => setLogFilter(level)}>
-                      {level === "all" ? "全部" : level.toUpperCase()}
+                      {level === "all" ? t.action.all : level.toUpperCase()}
                     </Button>
                   ))}
                 </div>
                 <div className="flex gap-2">
                   <Button variant={autoScroll ? "secondary" : "ghost"} size="sm" onClick={() => setAutoScroll(!autoScroll)}>
                     <ArrowDown className="h-3.5 w-3.5" />
-                    自动滚动
+                    {t.action.autoScroll}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => run(async () => { await clearEvents(); setEvents([]); return { success: true }; }, "日志已清空")}>
                     <Trash2 className="h-3.5 w-3.5" />
-                    清空
+                    {t.action.clear}
                   </Button>
                 </div>
               </div>
@@ -658,44 +910,44 @@ export default function CocoXiaoMusic() {
                 {filteredLogs.map((event, index) => (
                   <LogLine key={`${event.at}-${index}`} event={event} terminal />
                 ))}
-                {filteredLogs.length === 0 && <span className="text-zinc-500">暂无日志</span>}
+                {filteredLogs.length === 0 && <span className="text-zinc-500">{t.empty.noLog}</span>}
               </div>
             </div>
           )}
 
           {activeNav === "settings" && (
             <div className="mx-auto w-full max-w-[760px] space-y-4">
-              <Panel title="服务配置">
-                <Label title="coco 服务地址">
+              <Panel title={t.label.serviceConfig}>
+                <Label title={t.label.cocoBase}>
                   <div className="flex gap-2">
                     <Input value={cocoBase} onChange={(event) => setCocoBase(event.target.value)} />
                     <Button variant="secondary" onClick={testCoco} disabled={busy}>
-                      测试连接
+                      {t.action.test}
                     </Button>
                   </div>
                 </Label>
-                <Label title="MP3 流服务端口">
+                <Label title={t.label.streamPort}>
                   <Input value={adminPort} onChange={(event) => setAdminPort(event.target.value)} inputMode="numeric" className="max-w-[220px]" />
                 </Label>
-                <Label title="官方回答延迟秒数">
+                <Label title={t.label.answerDelay}>
                   <Input value={delay} onChange={(event) => setDelay(event.target.value)} inputMode="decimal" className="max-w-[220px]" />
                 </Label>
               </Panel>
 
-              <Panel title="语音接管">
-                <Label title="接管策略">
+              <Panel title={t.label.takeover}>
+                <Label title={t.label.takeoverMode}>
                   <Select value={takeoverMode} onValueChange={(value) => setTakeoverMode(value as TakeoverMode)}>
                     <SelectTrigger className="w-[220px]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="keyword">仅关键词接管</SelectItem>
-                      <SelectItem value="all">全部口令接管</SelectItem>
-                      <SelectItem value="off">关闭接管</SelectItem>
+                      <SelectItem value="keyword">{t.mode.keyword}</SelectItem>
+                      <SelectItem value="all">{t.mode.all}</SelectItem>
+                      <SelectItem value="off">{t.mode.off}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Label>
-                <Label title="接管关键词">
+                <Label title={t.label.keywords}>
                   <div className="flex flex-wrap gap-2">
                     {keywords.map((keyword) => (
                       <Badge key={keyword} variant="secondary" className="gap-1.5 px-2.5 py-1.5 text-[12px]">
@@ -707,24 +959,24 @@ export default function CocoXiaoMusic() {
                     ))}
                   </div>
                   <div className="mt-2 flex gap-2">
-                    <Input value={keywordDraft} onChange={(event) => setKeywordDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addKeyword()} placeholder="新增关键词" />
+                    <Input value={keywordDraft} onChange={(event) => setKeywordDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addKeyword()} placeholder={t.placeholder.keyword} />
                     <Button type="button" variant="secondary" onClick={addKeyword}>
                       <Plus className="h-3.5 w-3.5" />
-                      添加
+                      {t.action.add}
                     </Button>
                   </div>
                 </Label>
-                <Label title="搜索提示话术">
+                <Label title={t.label.searchTts}>
                   <Textarea value={searchTts} onChange={(event) => setSearchTts(event.target.value)} rows={2} />
                 </Label>
-                <Label title="命中提示话术">
+                <Label title={t.label.foundTts}>
                   <Textarea value={foundTts} onChange={(event) => setFoundTts(event.target.value)} rows={2} />
                 </Label>
-                <Label title="失败提示话术">
+                <Label title={t.label.errorTts}>
                   <Textarea value={errorTts} onChange={(event) => setErrorTts(event.target.value)} rows={2} />
                 </Label>
                 <div className="flex justify-end">
-                  <Button onClick={submitStrategy} disabled={busy}>保存策略</Button>
+                  <Button onClick={submitStrategy} disabled={busy}>{t.action.saveStrategy}</Button>
                 </div>
               </Panel>
             </div>
@@ -736,45 +988,45 @@ export default function CocoXiaoMusic() {
                 <section className="rounded-[10px] border border-amber-500/30 bg-amber-500/10 p-4">
                   <div className="mb-3 flex items-center gap-2 text-[14px] font-semibold text-amber-600 dark:text-amber-300">
                     <ShieldAlert className="h-4 w-4" />
-                    小米账号需要安全验证
+                    {t.label.miVerify}
                   </div>
                   <Input value={verificationUrl} readOnly className="mb-3 font-mono text-[12px]" />
                   <div className="flex flex-wrap gap-2">
                     <Button asChild>
                       <a href={verificationUrl} target="_blank" rel="noreferrer">
                         <ExternalLink className="h-3.5 w-3.5" />
-                        打开验证链接
+                        {t.action.openVerify}
                       </a>
                     </Button>
                     <Button variant="secondary" onClick={copyVerificationUrl}>
                       <Copy className="h-3.5 w-3.5" />
-                      复制链接
+                      {t.action.copy}
                     </Button>
                     <Button variant="secondary" onClick={() => run(() => refreshDevices(), "已刷新设备")} disabled={busy}>
                       <RefreshCw className="h-3.5 w-3.5" />
-                      我已验证，刷新设备
+                      {t.action.verifiedRefresh}
                     </Button>
                   </div>
                 </section>
               )}
 
-              <Panel title="小米账号">
-                <Label title="账号">
+              <Panel title={t.label.miAccount}>
+                <Label title={t.label.account}>
                   <Input value={account} onChange={(event) => setAccount(event.target.value)} autoComplete="username" />
                 </Label>
-                <Label title="密码">
+                <Label title={t.label.password}>
                   <Input value={password} onChange={(event) => setPasswordValue(event.target.value)} type="text" autoComplete="current-password" />
                 </Label>
-                <Label title="本机访问地址">
+                <Label title={t.label.host}>
                   <Input value={hostname} readOnly />
                 </Label>
                 <div className="flex justify-between">
                   <Button variant="outline" onClick={logoutAccount} disabled={busy} className="border-red-500/30 text-red-500 hover:bg-red-500/10">
                     <LogOut className="h-3.5 w-3.5" />
-                    退出登录
+                    {t.action.logout}
                   </Button>
                   <Button onClick={() => run(() => saveAccount(account, password, hostname), "账号已保存，正在重新登录")} disabled={busy}>
-                    保存并登录
+                    {t.action.saveLogin}
                   </Button>
                 </div>
               </Panel>
@@ -782,49 +1034,60 @@ export default function CocoXiaoMusic() {
           )}
         </main>
 
-        <footer className="absolute bottom-0 left-0 right-0 flex h-16 items-center border-t border-border bg-card px-4">
-          <div className="flex w-[30%] min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/20">
-              <Headphones className="h-4 w-4 text-violet-500" />
+        <footer className="absolute bottom-0 left-0 right-0 flex h-24 items-center border-t border-border bg-card px-5 py-3">
+          <div className="flex w-[28%] min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-violet-500/20">
+              <Headphones className="h-5 w-5 text-violet-500" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[13px] font-medium">{songTitle(currentSong)}</p>
+              <p className="truncate text-[14px] font-medium">{currentSong?.title || t.empty.noSong}</p>
               <p className="truncate text-[12px] text-zinc-500">{songArtist(currentSong)}</p>
             </div>
           </div>
 
-          <div className="flex w-[40%] flex-col items-center">
-            <div className="mb-1.5 flex items-center gap-3">
+          <div className="flex w-[44%] flex-col items-center gap-2">
+            <div className="flex items-center gap-4">
               <Button variant="ghost" size="icon-sm" disabled><SkipBack className="h-4 w-4" /></Button>
-              <Button onClick={togglePlayback} disabled={busy} size="icon-sm" className="rounded-full">
-                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+              <Button onClick={togglePlayback} disabled={busy} size="icon-sm" className="h-10 w-10 rounded-full">
+                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
               </Button>
               <Button onClick={() => run(stopPlayback, "已停止")} disabled={busy} variant="ghost" size="icon-sm"><Square className="h-3.5 w-3.5" /></Button>
               <Button variant="ghost" size="icon-sm" disabled><SkipForward className="h-4 w-4" /></Button>
             </div>
-            <div className="flex w-full max-w-md items-center gap-2">
+            <div className="flex w-full max-w-2xl items-center gap-3">
               <span className="w-10 text-right text-[11px] text-zinc-500">{formatTime(position)}</span>
               <Slider value={[progress]} min={0} max={100} onValueChange={(value) => setProgress(value[0] ?? 0)} onValueCommit={(value) => commitProgress(value[0] ?? progress)} />
               <span className="w-10 text-[11px] text-zinc-500">{duration ? formatTime(duration) : "--:--"}</span>
             </div>
           </div>
 
-          <div className="flex w-[30%] items-center justify-end gap-4">
-            <div className="flex w-[168px] items-center gap-2">
+          <div className="flex w-[28%] items-center justify-end gap-4">
+            <div className="flex w-[190px] items-center gap-2">
               <Volume2 className="h-4 w-4 shrink-0 text-zinc-400" />
               <Slider value={[volume]} min={0} max={100} onValueChange={(value) => setLocalVolume(value[0] ?? volume)} onValueCommit={commitVolume} />
               <span className="w-9 text-right font-mono text-[11px] text-zinc-500">{volume}%</span>
             </div>
             <div className="flex max-w-[190px] items-center gap-1.5 rounded-md bg-muted px-2 py-1">
               <Speaker className="h-3 w-3 shrink-0 text-zinc-500" />
-              <span className="truncate text-[11px] text-zinc-500">推送至: {activeDeviceName}</span>
+              <span className="truncate text-[11px] text-zinc-500">{t.label.pushTo}: {activeDeviceName}</span>
             </div>
           </div>
         </footer>
 
-        <div className="absolute bottom-20 right-5 max-w-[520px] rounded-[10px] border border-border bg-card px-3 py-2 text-[12px] shadow-2xl">
-          {toast}
-        </div>
+        {dialog && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/35 px-4" onClick={() => setDialog(null)}>
+            <div className="w-full max-w-[420px] rounded-[10px] border border-border bg-card p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-2 flex items-center gap-2">
+                <div className={cn("h-2.5 w-2.5 rounded-full", dialog.tone === "success" ? "bg-emerald-500" : "bg-red-500")} />
+                <h3 className="text-[15px] font-semibold">{dialog.title}</h3>
+              </div>
+              <p className="whitespace-pre-wrap break-words text-[13px] text-zinc-500">{dialog.message}</p>
+              <div className="mt-5 flex justify-end">
+                <Button onClick={() => setDialog(null)}>{t.action.ok}</Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -857,7 +1120,8 @@ function DeviceRow({
   onTarget,
   onAlias,
   onSave,
-  onMakeDefault
+  onMakeDefault,
+  uiText
 }: {
   device: Device;
   listening: boolean;
@@ -868,6 +1132,7 @@ function DeviceRow({
   onAlias: (value: string) => void;
   onSave: () => void;
   onMakeDefault: () => void;
+  uiText: (typeof text)[Language];
 }) {
   return (
     <div className="grid grid-cols-[42px_minmax(0,1fr)_104px_104px_190px_72px_36px] items-center gap-3 rounded-[10px] border border-border bg-card px-4 py-3">
@@ -875,19 +1140,19 @@ function DeviceRow({
         <Speaker className="h-5 w-5 text-zinc-400" />
       </div>
       <div className="min-w-0">
-        <p className="truncate text-[13px] font-medium">{device.name || device.raw_name || "未命名设备"}</p>
+        <p className="truncate text-[13px] font-medium">{device.name || device.raw_name || uiText.empty.unnamedDevice}</p>
         <p className="truncate text-[11px] text-zinc-500">DID: {device.did} · {device.hardware || "--"}</p>
       </div>
       <div className="flex items-center gap-2">
         <Switch checked={listening} onCheckedChange={onListen} />
-        <span className="text-[12px] text-zinc-500">监听</span>
+        <span className="text-[12px] text-zinc-500">{uiText.label.listen}</span>
       </div>
       <div className="flex items-center gap-2">
         <Switch checked={target} onCheckedChange={onTarget} />
-        <span className="text-[12px] text-zinc-500">推送</span>
+        <span className="text-[12px] text-zinc-500">{uiText.label.push}</span>
       </div>
-      <Input value={alias} onChange={(event) => onAlias(event.target.value)} placeholder="本地别名" className="h-9 text-[12px]" />
-      <Button onClick={onSave} variant="secondary" size="sm">命名</Button>
+      <Input value={alias} onChange={(event) => onAlias(event.target.value)} placeholder={uiText.placeholder.alias} className="h-9 text-[12px]" />
+      <Button onClick={onSave} variant="secondary" size="sm">{uiText.label.rename}</Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon-sm">
@@ -897,11 +1162,11 @@ function DeviceRow({
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={onMakeDefault}>
             <Check className="h-4 w-4" />
-            设为默认推送
+            {uiText.label.defaultPush}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onSave}>
             <Save className="h-4 w-4" />
-            保存别名
+            {uiText.label.saveAlias}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -913,17 +1178,17 @@ function LogLine({ event, terminal = false, compact = false }: { event: EventIte
   const label = levelLabel(event.level);
   if (compact) {
     return (
-      <div className="grid grid-cols-[58px_44px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
+      <div className="grid grid-cols-[58px_44px_minmax(0,1fr)] items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
         <span className="text-[11px] text-zinc-500">{String(event.at).slice(-8)}</span>
-        <span className={cn("rounded border px-1.5 py-0.5 text-center text-[10px]", levelTone(event.level))}>{label}</span>
+        <span className={cn("self-start rounded border px-1.5 py-0.5 text-center text-[10px] leading-none", levelTone(event.level))}>{label}</span>
         <span className="truncate text-[12px]">{event.message}</span>
       </div>
     );
   }
   return (
-    <div className={cn("flex gap-3 py-1", terminal ? "" : "text-zinc-700 dark:text-zinc-300")}>
+    <div className={cn("flex items-start gap-3 py-1.5", terminal ? "" : "text-zinc-700 dark:text-zinc-300")}>
       <span className="w-20 shrink-0 text-zinc-500">{terminal ? String(event.at).slice(-8) : event.at}</span>
-      <span className={cn("w-12 shrink-0 rounded border px-1 text-center text-[10px]", levelTone(event.level))}>{label}</span>
+      <span className={cn("w-12 shrink-0 rounded border px-1 py-1 text-center text-[10px] leading-none", levelTone(event.level))}>{label}</span>
       <span className={cn("min-w-0 flex-1 break-words", terminal ? "text-zinc-200" : "")}>{event.message}</span>
     </div>
   );

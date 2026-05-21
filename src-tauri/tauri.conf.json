@@ -14,9 +14,9 @@
       {
         "create": false,
         "title": "coco-xiaomusic",
-        "width": 1320,
+        "width": 1480,
         "height": 840,
-        "minWidth": 1100,
+        "minWidth": 1180,
         "minHeight": 720
       }
     ],
