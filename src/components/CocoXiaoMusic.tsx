@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity,
@@ -39,6 +40,7 @@ import {
   clearEvents,
   getEvents,
   getStatus,
+  handleCloseChoice,
   pausePlayback,
   playKeyword,
   playSelected,
@@ -51,6 +53,7 @@ import {
   search,
   seekPlayback,
   setVolume,
+  syncTrayPlaylist,
   testCocoConnection,
   stopPlayback
 } from "../lib/api";
@@ -59,6 +62,7 @@ import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { Slider } from "./ui/slider";
 import { Switch } from "./ui/switch";
@@ -518,6 +522,8 @@ export default function CocoXiaoMusic() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string>(t.message.connecting);
   const [dialog, setDialog] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [rememberCloseChoice, setRememberCloseChoice] = useState(false);
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [volume, setLocalVolume] = useState(50);
@@ -541,6 +547,21 @@ export default function CocoXiaoMusic() {
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   const isDark = theme === "dark";
+  const closeCopy = language === "zh"
+    ? {
+        title: "关闭 coco-xiaomusic？",
+        message: "可以最小化到右下角托盘继续运行，也可以退出应用并关闭后台服务。",
+        remember: "记住我的选择",
+        tray: "最小化到右下角",
+        exit: "退出应用"
+      }
+    : {
+        title: "Close coco-xiaomusic?",
+        message: "Keep it running in the system tray, or exit the app and stop the background service.",
+        remember: "Remember my choice",
+        tray: "Minimize to tray",
+        exit: "Exit app"
+      };
   const devices = status.devices ?? [];
   const currentSong = status.last_song ?? null;
   const isPlaying = Boolean(status.last_used_url && !status.playback_paused);
@@ -622,6 +643,36 @@ export default function CocoXiaoMusic() {
   }, [playlist, playlistIndex]);
 
   useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    syncTrayPlaylist(playlist, playlistIndex).catch(() => undefined);
+  }, [playlist, playlistIndex]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlistenClose: (() => void) | undefined;
+    let unlistenTray: (() => void) | undefined;
+    listen("coco-close-requested", () => {
+      setClosePromptOpen(true);
+    }).then((cleanup) => {
+      unlistenClose = cleanup;
+    });
+    listen<{ index?: number; refresh?: boolean }>("coco-tray-action", (event) => {
+      if (typeof event.payload?.index === "number") {
+        setPlaylistIndex(event.payload.index);
+      }
+      if (event.payload?.refresh) {
+        refresh(true);
+      }
+    }).then((cleanup) => {
+      unlistenTray = cleanup;
+    });
+    return () => {
+      unlistenClose?.();
+      unlistenTray?.();
+    };
+  }, []);
+
+  useEffect(() => {
     setSelectedIndex(0);
   }, [providerFilter]);
 
@@ -653,6 +704,15 @@ export default function CocoXiaoMusic() {
 
   function showDialog(title: string, message: string, tone: "success" | "error" = "success") {
     setDialog({ title, message, tone });
+  }
+
+  async function chooseCloseBehavior(behavior: "tray" | "exit") {
+    try {
+      await handleCloseChoice(behavior, rememberCloseChoice);
+      setClosePromptOpen(false);
+    } catch (error) {
+      setToast(String(error));
+    }
   }
 
   async function refresh(forceHydrate = false) {
@@ -1521,6 +1581,33 @@ export default function CocoXiaoMusic() {
               <p className="whitespace-pre-wrap break-words text-[13px] text-zinc-500">{dialog.message}</p>
               <div className="mt-5 flex justify-end">
                 <Button onClick={() => setDialog(null)}>{t.action.ok}</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {closePromptOpen && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-[440px] rounded-[10px] border border-border bg-card p-5 shadow-2xl">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+                <h3 className="text-[15px] font-semibold">{closeCopy.title}</h3>
+              </div>
+              <p className="text-[13px] leading-6 text-zinc-500">{closeCopy.message}</p>
+              <label className="mt-4 flex cursor-pointer items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
+                <Checkbox
+                  checked={rememberCloseChoice}
+                  onCheckedChange={(checked) => setRememberCloseChoice(checked === true)}
+                />
+                <span>{closeCopy.remember}</span>
+              </label>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => chooseCloseBehavior("tray")}>
+                  {closeCopy.tray}
+                </Button>
+                <Button onClick={() => chooseCloseBehavior("exit")}>
+                  {closeCopy.exit}
+                </Button>
               </div>
             </div>
           </div>

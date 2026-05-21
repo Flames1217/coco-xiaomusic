@@ -23,6 +23,14 @@ export async function playSelected(song: Song) {
   return invoke("play_selected", { payload: { song } });
 }
 
+export async function syncTrayPlaylist(playlist: Song[], current_index: number) {
+  return invoke("sync_tray_playlist", { payload: { playlist, current_index } });
+}
+
+export async function handleCloseChoice(behavior: "tray" | "exit", remember: boolean) {
+  return invoke("handle_close_choice", { payload: { behavior, remember } });
+}
+
 export async function pausePlayback() {
   return invoke("pause_playback");
 }

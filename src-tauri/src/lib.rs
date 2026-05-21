@@ -9,7 +9,11 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 use tokio::time::sleep;
 
 #[derive(Debug)]
@@ -23,6 +27,16 @@ struct SidecarProcess {
 struct AppState {
     client: reqwest::Client,
     sidecar: Mutex<Option<SidecarProcess>>,
+    tray: Mutex<TrayState>,
+    close_behavior: Mutex<Option<CloseBehavior>>,
+    runtime_home: Mutex<Option<PathBuf>>,
+    quitting: Mutex<bool>,
+}
+
+#[derive(Debug, Default)]
+struct TrayState {
+    playlist: Vec<Value>,
+    current_index: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +51,45 @@ struct SongPayload {
     song: Value,
 }
 
+#[derive(Debug, Deserialize)]
+struct TrayPlaylistPayload {
+    playlist: Vec<Value>,
+    current_index: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct CloseChoicePayload {
+    behavior: String,
+    remember: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AppPrefs {
+    close_behavior: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseBehavior {
+    Tray,
+    Exit,
+}
+
+impl CloseBehavior {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "tray" | "minimize" => Some(Self::Tray),
+            "exit" | "quit" => Some(Self::Exit),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Tray => "tray",
+            Self::Exit => "exit",
+        }
+    }
+}
 #[derive(Debug, Deserialize)]
 struct SeekPayload {
     seconds: f64,
@@ -98,6 +151,59 @@ impl AppState {
                 .build()
                 .expect("reqwest client"),
             sidecar: Mutex::new(None),
+            tray: Mutex::new(TrayState {
+                playlist: Vec::new(),
+                current_index: -1,
+            }),
+            close_behavior: Mutex::new(None),
+            runtime_home: Mutex::new(None),
+            quitting: Mutex::new(false),
+        }
+    }
+
+    fn set_runtime_home(&self, home: PathBuf) -> Result<(), String> {
+        let mut guard = self
+            .runtime_home
+            .lock()
+            .map_err(|_| "运行目录状态锁异常".to_string())?;
+        *guard = Some(home);
+        Ok(())
+    }
+
+    fn runtime_home(&self) -> Result<PathBuf, String> {
+        let guard = self
+            .runtime_home
+            .lock()
+            .map_err(|_| "运行目录状态锁异常".to_string())?;
+        guard
+            .clone()
+            .ok_or_else(|| "运行目录尚未初始化".to_string())
+    }
+
+    fn close_behavior(&self) -> Result<Option<CloseBehavior>, String> {
+        let guard = self
+            .close_behavior
+            .lock()
+            .map_err(|_| "关闭偏好状态锁异常".to_string())?;
+        Ok(*guard)
+    }
+
+    fn set_close_behavior(&self, behavior: Option<CloseBehavior>) -> Result<(), String> {
+        let mut guard = self
+            .close_behavior
+            .lock()
+            .map_err(|_| "关闭偏好状态锁异常".to_string())?;
+        *guard = behavior;
+        Ok(())
+    }
+
+    fn is_quitting(&self) -> bool {
+        self.quitting.lock().map(|guard| *guard).unwrap_or(false)
+    }
+
+    fn mark_quitting(&self) {
+        if let Ok(mut guard) = self.quitting.lock() {
+            *guard = true;
         }
     }
 
@@ -292,6 +398,292 @@ fn prepare_home() -> Result<PathBuf, String> {
     Ok(home)
 }
 
+fn prefs_path(home: &std::path::Path) -> PathBuf {
+    home.join("data").join("app_prefs.json")
+}
+
+fn load_close_behavior(home: &std::path::Path) -> Option<CloseBehavior> {
+    let text = fs::read_to_string(prefs_path(home)).ok()?;
+    let prefs = serde_json::from_str::<AppPrefs>(&text).ok()?;
+    CloseBehavior::from_str(prefs.close_behavior.as_deref()?)
+}
+
+fn save_close_behavior(home: &std::path::Path, behavior: CloseBehavior) -> Result<(), String> {
+    let prefs = AppPrefs {
+        close_behavior: Some(behavior.as_str().to_string()),
+    };
+    let path = prefs_path(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("保存关闭偏好失败: {error}"))?;
+    }
+    let text = serde_json::to_string_pretty(&prefs)
+        .map_err(|error| format!("保存关闭偏好失败: {error}"))?;
+    fs::write(path, text).map_err(|error| format!("保存关闭偏好失败: {error}"))
+}
+
+fn menu_text(value: &str, max_chars: usize) -> String {
+    let cleaned = value.replace('&', "&&");
+    let mut text: String = cleaned.chars().take(max_chars).collect();
+    if cleaned.chars().count() > max_chars {
+        text.push_str("...");
+    }
+    text
+}
+
+fn song_menu_text(song: &Value, index: usize, current_index: i32) -> String {
+    let title = song
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("未知歌曲");
+    let artist = song
+        .get("artist")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("--");
+    let marker = if current_index == index as i32 {
+        "正在播放 "
+    } else {
+        ""
+    };
+    menu_text(
+        &format!("{:02}. {marker}{title} - {artist}", index + 1),
+        48,
+    )
+}
+
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::with_id(app, "tray-menu")?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-open",
+        "打开主窗口",
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-prev",
+        "上一首",
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-toggle",
+        "播放 / 暂停",
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-next",
+        "下一首",
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+
+    let playlist_menu = Submenu::with_id(app, "tray-playlist", "播放列表", true)?;
+    let (playlist, current_index) = {
+        let state = app.state::<AppState>();
+        let snapshot = match state.tray.lock() {
+            Ok(guard) => (guard.playlist.clone(), guard.current_index),
+            Err(_) => (Vec::new(), -1),
+        };
+        snapshot
+    };
+    if playlist.is_empty() {
+        playlist_menu.append(&MenuItem::with_id(
+            app,
+            "tray-empty",
+            "播放列表为空",
+            false,
+            None::<&str>,
+        )?)?;
+    } else {
+        for (index, song) in playlist.iter().take(25).enumerate() {
+            playlist_menu.append(&MenuItem::with_id(
+                app,
+                format!("tray-play-{index}"),
+                song_menu_text(song, index, current_index),
+                true,
+                None::<&str>,
+            )?)?;
+        }
+        if playlist.len() > 25 {
+            playlist_menu.append(&MenuItem::with_id(
+                app,
+                "tray-more",
+                format!("还有 {} 首，请在主窗口查看", playlist.len() - 25),
+                false,
+                None::<&str>,
+            )?)?;
+        }
+    }
+    menu.append(&playlist_menu)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-exit",
+        "退出应用并关闭服务",
+        true,
+        None::<&str>,
+    )?)?;
+    Ok(menu)
+}
+
+fn update_tray_menu(app: &AppHandle) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main") {
+        let menu = build_tray_menu(app).map_err(|error| error.to_string())?;
+        tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn emit_tray_action(app: &AppHandle, index: Option<i32>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("coco-tray-action", json!({ "index": index, "refresh": true }));
+    }
+}
+
+async fn play_tray_index(app: AppHandle, index: usize) {
+    let song = {
+        let state = app.state::<AppState>();
+        let mut guard = match state.tray.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let song = guard.playlist.get(index).cloned();
+        if song.is_some() {
+            guard.current_index = index as i32;
+        }
+        song
+    };
+    if let Some(song) = song {
+        let _ = app
+            .state::<AppState>()
+            .post("/play/selected", json!({ "song": song }))
+            .await;
+        let _ = update_tray_menu(&app);
+        emit_tray_action(&app, Some(index as i32));
+    }
+}
+
+async fn play_tray_offset(app: AppHandle, offset: i32) {
+    let next_index = {
+        let state = app.state::<AppState>();
+        let guard = match state.tray.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        if guard.playlist.is_empty() {
+            return;
+        }
+        let len = guard.playlist.len() as i32;
+        let current = if guard.current_index >= 0 {
+            guard.current_index
+        } else {
+            0
+        };
+        (current + offset).rem_euclid(len) as usize
+    };
+    play_tray_index(app, next_index).await;
+}
+
+async fn toggle_tray_playback(app: AppHandle) {
+    let state = app.state::<AppState>();
+    let status = match state.get("/status").await {
+        Ok(status) => status,
+        Err(_) => return,
+    };
+    let has_playback = status
+        .get("last_used_url")
+        .and_then(Value::as_str)
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+    let paused = status
+        .get("playback_paused")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let path = if has_playback && !paused {
+        "/playback/pause"
+    } else {
+        "/playback/resume"
+    };
+    let _ = state.post(path, json!({})).await;
+    emit_tray_action(&app, None);
+}
+
+fn create_tray(app: &tauri::App) -> tauri::Result<()> {
+    let menu = build_tray_menu(app.handle())?;
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("coco-xiaomusic")
+        .menu(&menu)
+        .show_menu_on_left_click(true);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+fn handle_tray_menu(app: &AppHandle, id: &str) {
+    match id {
+        "tray-open" => show_main_window(app),
+        "tray-prev" => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move { play_tray_offset(handle, -1).await });
+        }
+        "tray-toggle" => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move { toggle_tray_playback(handle).await });
+        }
+        "tray-next" => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move { play_tray_offset(handle, 1).await });
+        }
+        "tray-exit" => {
+            let state = app.state::<AppState>();
+            state.mark_quitting();
+            app.exit(0);
+        }
+        _ if id.starts_with("tray-play-") => {
+            if let Ok(index) = id.trim_start_matches("tray-play-").parse::<usize>() {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move { play_tray_index(handle, index).await });
+            }
+        }
+        _ => {}
+    }
+}
+
 fn spawn_sidecar(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -401,6 +793,46 @@ async fn play_selected(payload: SongPayload, state: State<'_, AppState>) -> Resu
     state
         .post("/play/selected", json!({ "song": payload.song }))
         .await
+}
+
+#[tauri::command]
+fn sync_tray_playlist(
+    payload: TrayPlaylistPayload,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut guard = state
+            .tray
+            .lock()
+            .map_err(|_| "播放列表状态锁异常".to_string())?;
+        guard.playlist = payload.playlist;
+        guard.current_index = payload.current_index;
+    }
+    update_tray_menu(&app)
+}
+
+#[tauri::command]
+fn handle_close_choice(
+    payload: CloseChoicePayload,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let behavior = CloseBehavior::from_str(&payload.behavior)
+        .ok_or_else(|| "未知关闭方式".to_string())?;
+    if payload.remember {
+        let home = state.runtime_home()?;
+        save_close_behavior(&home, behavior)?;
+        state.set_close_behavior(Some(behavior))?;
+    }
+    match behavior {
+        CloseBehavior::Tray => hide_main_window(&app),
+        CloseBehavior::Exit => {
+            state.mark_quitting();
+            app.exit(0);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -523,15 +955,53 @@ async fn clear_events(state: State<'_, AppState>) -> Result<Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new())
+        .on_menu_event(|app, event| handle_tray_menu(app, event.id().as_ref()))
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                if state.is_quitting() {
+                    return;
+                }
+                match state.close_behavior().unwrap_or(None) {
+                    Some(CloseBehavior::Tray) => {
+                        api.prevent_close();
+                        hide_main_window(app);
+                    }
+                    Some(CloseBehavior::Exit) => {
+                        api.prevent_close();
+                        state.mark_quitting();
+                        app.exit(0);
+                    }
+                    None => {
+                        api.prevent_close();
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                        let _ = window.emit("coco-close-requested", json!({}));
+                    }
+                }
+            }
+        })
         .setup(|app| {
             let home =
                 prepare_home().map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            {
+                let state = app.state::<AppState>();
+                state
+                    .set_runtime_home(home.clone())
+                    .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+                state
+                    .set_close_behavior(load_close_behavior(&home))
+                    .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            }
             WebviewWindowBuilder::new(app.handle(), "main", WebviewUrl::App("index.html".into()))
                 .title("coco-xiaomusic")
                 .inner_size(1480.0, 840.0)
                 .min_inner_size(1180.0, 720.0)
                 .data_directory(home.join("webview"))
                 .build()?;
+            create_tray(app)?;
 
             let state = app.state::<AppState>();
             let bootstrap = spawn_sidecar(app.handle(), state.inner(), home)
@@ -551,6 +1021,8 @@ pub fn run() {
             search,
             play_keyword,
             play_selected,
+            sync_tray_playlist,
+            handle_close_choice,
             pause_playback,
             resume_playback,
             stop_playback,
