@@ -36,6 +36,7 @@ import {
   Trash2,
   UploadCloud,
   Volume2,
+  VolumeX,
   X
 } from "lucide-react";
 import {
@@ -191,6 +192,7 @@ const text = {
       verifiedRefresh: "我已验证，刷新设备",
       logout: "退出登录",
       saveLogin: "保存并登录",
+      close: "关闭",
       ok: "确定"
     },
     label: {
@@ -336,6 +338,7 @@ const text = {
       verifiedRefresh: "Verified, refresh devices",
       logout: "Log out",
       saveLogin: "Save & sign in",
+      close: "Close",
       ok: "OK"
     },
     label: {
@@ -565,6 +568,8 @@ export default function CocoXiaoMusic() {
   const [searchFeedback, setSearchFeedback] = useState<SearchFeedback | null>(null);
   const [playlist, setPlaylist] = useState<Song[]>(loadPlaylist);
   const [playlistIndex, setPlaylistIndex] = useState(-1);
+  const [playlistPanelOpen, setPlaylistPanelOpen] = useState(false);
+  const [volumePanelOpen, setVolumePanelOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string>(t.message.connecting);
   const [dialog, setDialog] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
@@ -596,6 +601,7 @@ export default function CocoXiaoMusic() {
   const formsHydrated = useRef(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const updateCheckedRef = useRef(false);
+  const previousVolumeRef = useRef(loadSavedVolume() > 0 ? loadSavedVolume() : 50);
 
   const isDark = theme === "dark";
   const closeCopy = language === "zh"
@@ -684,11 +690,13 @@ export default function CocoXiaoMusic() {
     if (typeof status.last_volume === "number") {
       const nextVolume = Math.max(0, Math.min(100, Math.round(status.last_volume)));
       setLocalVolume(nextVolume);
+      if (nextVolume > 0) previousVolumeRef.current = nextVolume;
       localStorage.setItem(volumeStorageKey, String(nextVolume));
     }
   }, [status.last_volume]);
 
   useEffect(() => {
+    if (volume > 0) previousVolumeRef.current = volume;
     localStorage.setItem(volumeStorageKey, String(volume));
   }, [volume]);
 
@@ -958,10 +966,25 @@ export default function CocoXiaoMusic() {
     await run(() => seekPlayback((nextProgress / 100) * duration), "已调整播放进度");
   }
 
+  async function applyVolume(value: number, message?: string) {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(value)));
+    setLocalVolume(nextVolume);
+    if (nextVolume > 0) previousVolumeRef.current = nextVolume;
+    await run(() => setVolume(nextVolume), message ?? `音量已调整到 ${nextVolume}%`);
+  }
+
   async function commitVolume(values: number[]) {
-    const value = Math.max(0, Math.min(100, Math.round(values[0] ?? volume)));
-    setLocalVolume(value);
-    await run(() => setVolume(value), `音量已调整到 ${value}%`);
+    await applyVolume(values[0] ?? volume);
+  }
+
+  async function toggleMute() {
+    if (volume > 0) {
+      previousVolumeRef.current = volume;
+      await applyVolume(0, "已静音");
+      return;
+    }
+    const value = previousVolumeRef.current > 0 ? previousVolumeRef.current : 50;
+    await applyVolume(value, `音量已恢复到 ${value}%`);
   }
 
   function toggleSet(source: Set<string>, did: string, enabled: boolean): Set<string> {
@@ -1631,6 +1654,69 @@ export default function CocoXiaoMusic() {
           )}
         </main>
 
+        {playlistPanelOpen && (
+          <section className="absolute bottom-24 right-5 z-40 flex max-h-[calc(100%-120px)] w-[390px] flex-col rounded-[14px] border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <ListMusic className="h-4 w-4 text-violet-500" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-[15px] font-semibold">{t.label.playlist}</h2>
+                  <p className="text-[11px] text-zinc-500">{formatMessage(t.playlist.count, { count: playlist.length })}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button variant="secondary" size="icon-sm" disabled={playlist.length === 0 || busy} title={t.action.playAll} onClick={() => playPlaylistItem(playlistIndex >= 0 ? playlistIndex : 0)}>
+                  <Play className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon-sm" disabled={playlist.length === 0} title={t.action.clearPlaylist} onClick={clearPlaylist}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon-sm" title={t.action.close} onClick={() => setPlaylistPanelOpen(false)}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+            <div className="overflow-y-auto p-3">
+              {playlist.length === 0 ? (
+                <div className="rounded-[10px] border border-dashed border-border p-6 text-center">
+                  <ListMusic className="mx-auto mb-2 h-7 w-7 text-zinc-400" />
+                  <p className="text-[13px] font-medium">{t.playlist.empty}</p>
+                  <p className="mt-1 text-[12px] text-zinc-500">{t.playlist.hint}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {playlist.map((song, index) => (
+                    <div
+                      key={`${songKey(song)}-${index}`}
+                      className={cn(
+                        "group flex items-center gap-3 rounded-[10px] border border-border p-2 transition-colors hover:bg-muted/60",
+                        playlistIndex === index && "border-violet-500/35 bg-violet-500/10"
+                      )}
+                    >
+                      <CoverArt song={song} className="h-12 w-12" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium">{song.title || "--"}</p>
+                        <p className="truncate text-[12px] text-zinc-500">{song.artist || "--"}</p>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{providerLabel(song.provider)}</Badge>
+                          <span className="truncate text-[11px] text-zinc-500">{song.album || "--"}</span>
+                        </div>
+                      </div>
+                      <span className="w-10 text-right font-mono text-[11px] text-zinc-500">{durationText(song.duration)}</span>
+                      <Button variant="ghost" size="icon-sm" disabled={busy} title={t.action.push} onClick={() => playPlaylistItem(index)}>
+                        <Play className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" title={t.action.remove} onClick={() => removeFromPlaylist(index)}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
         <footer className="absolute bottom-0 left-0 right-0 flex h-24 items-center border-t border-border bg-card px-5 py-3">
           <div className="flex w-[28%] min-w-0 items-center gap-3">
             <CoverArt song={currentSong ?? undefined} className="h-11 w-11" fallbackIcon={<Headphones className="h-5 w-5 text-violet-500" />} />
@@ -1656,11 +1742,44 @@ export default function CocoXiaoMusic() {
             </div>
           </div>
 
-          <div className="flex w-[28%] items-center justify-end gap-4">
-            <div className="flex w-[190px] items-center gap-2">
-              <Volume2 className="h-4 w-4 shrink-0 text-zinc-400" />
-              <Slider value={[volume]} min={0} max={100} onValueChange={(value) => setLocalVolume(value[0] ?? volume)} onValueCommit={commitVolume} />
-              <span className="w-9 text-right font-mono text-[11px] text-zinc-500">{volume}%</span>
+          <div className="flex w-[28%] items-center justify-end gap-3">
+            <Button
+              variant={playlistPanelOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              title={t.label.playlist}
+              onClick={() => setPlaylistPanelOpen((open) => !open)}
+            >
+              <ListMusic className="h-4 w-4" />
+            </Button>
+            <div
+              className="relative flex items-center"
+              onMouseEnter={() => setVolumePanelOpen(true)}
+              onMouseLeave={() => setVolumePanelOpen(false)}
+            >
+              {volumePanelOpen && (
+                <div className="absolute bottom-9 left-1/2 z-50 -translate-x-1/2 pb-2">
+                  <div className="flex h-[160px] w-12 flex-col items-center gap-2 rounded-full border border-border bg-card px-3 py-3 shadow-2xl">
+                    <Slider
+                      orientation="vertical"
+                      value={[volume]}
+                      min={0}
+                      max={100}
+                      onValueChange={(value) => setLocalVolume(value[0] ?? volume)}
+                      onValueCommit={commitVolume}
+                      className="h-24 min-h-24"
+                    />
+                    <span className="font-mono text-[10px] text-zinc-500">{volume}%</span>
+                  </div>
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title={volume > 0 ? "静音" : "恢复音量"}
+                onClick={toggleMute}
+              >
+                {volume > 0 ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </Button>
             </div>
             <div className="flex max-w-[190px] items-center gap-1.5 rounded-md bg-muted px-2 py-1">
               <Speaker className="h-3 w-3 shrink-0 text-zinc-500" />
