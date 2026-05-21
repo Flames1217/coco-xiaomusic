@@ -1757,8 +1757,8 @@ export default function CocoXiaoMusic() {
               onMouseLeave={() => setVolumePanelOpen(false)}
             >
               {volumePanelOpen && (
-                <div className="absolute bottom-9 left-1/2 z-50 -translate-x-1/2 pb-2">
-                  <div className="flex h-[160px] w-12 flex-col items-center gap-2 rounded-full border border-border bg-card px-3 py-3 shadow-2xl">
+                <div className="absolute bottom-full left-1/2 z-50 -translate-x-1/2 pb-3">
+                  <div className="flex h-[148px] w-11 flex-col items-center gap-2 rounded-2xl border border-border bg-popover px-3 py-3 shadow-2xl">
                     <Slider
                       orientation="vertical"
                       value={[volume]}
@@ -1766,9 +1766,9 @@ export default function CocoXiaoMusic() {
                       max={100}
                       onValueChange={(value) => setLocalVolume(value[0] ?? volume)}
                       onValueCommit={commitVolume}
-                      className="h-24 min-h-24"
+                      className="h-[96px] min-h-[96px]"
                     />
-                    <span className="font-mono text-[10px] text-zinc-500">{volume}%</span>
+                    <span className="h-4 font-mono text-[10px] leading-4 text-zinc-500">{volume}%</span>
                   </div>
                 </div>
               )}
