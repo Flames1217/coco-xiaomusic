@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Headphones,
   Home,
+  ListMusic,
   Loader2,
   LogOut,
   MoreHorizontal,
@@ -82,6 +83,9 @@ type Theme = "dark" | "light";
 type Language = "zh" | "en";
 type TakeoverMode = "keyword" | "all" | "off";
 type ActionResult = { success?: boolean; error?: string; [key: string]: unknown };
+type SearchFeedback = { tone: "info" | "success" | "warn" | "error"; message: string };
+
+const playlistStorageKey = "coco-playlist";
 
 const defaultKeywords = ["播放", "放一首", "来一首", "唱", "coco"];
 
@@ -113,6 +117,10 @@ const text = {
       playBest: "播放首选",
       search: "搜索",
       push: "推送",
+      addToPlaylist: "加入列表",
+      playAll: "播放列表",
+      clearPlaylist: "清空列表",
+      remove: "移除",
       refreshDevices: "刷新设备",
       saveDevices: "保存设备",
       all: "全部",
@@ -134,6 +142,9 @@ const text = {
       devices: "设备",
       cocoService: "coco 服务",
       recentCommand: "最近口令",
+      searchFeedback: "搜索状态",
+      searchResults: "搜索结果",
+      playlist: "播放列表",
       recentPush: "最近推送",
       recentActivity: "最近活动",
       todayPushes: "今日推送次数",
@@ -170,6 +181,20 @@ const text = {
       duration: "时长",
       source: "来源",
       action: "操作"
+    },
+    searchState: {
+      idle: "输入关键词后按 Enter 或点击搜索",
+      searching: "正在搜索「{keyword}」...",
+      done: "搜索完成：找到 {count} 首",
+      empty: "没有搜到「{keyword}」，换个关键词试试",
+      error: "搜索失败：{error}",
+      added: "已加入播放列表：{title}",
+      duplicate: "播放列表里已经有这首歌了"
+    },
+    playlist: {
+      empty: "播放列表为空",
+      hint: "从搜索结果加入歌曲后，可在这里连续切歌",
+      count: "{count} 首"
     },
     empty: {
       noSong: "暂无歌曲",
@@ -233,6 +258,10 @@ const text = {
       playBest: "Play best",
       search: "Search",
       push: "Push",
+      addToPlaylist: "Add",
+      playAll: "Play list",
+      clearPlaylist: "Clear list",
+      remove: "Remove",
       refreshDevices: "Refresh devices",
       saveDevices: "Save devices",
       all: "All",
@@ -254,6 +283,9 @@ const text = {
       devices: "Devices",
       cocoService: "coco Service",
       recentCommand: "Last command",
+      searchFeedback: "Search status",
+      searchResults: "Search results",
+      playlist: "Playlist",
       recentPush: "Recent pushes",
       recentActivity: "Recent activity",
       todayPushes: "Pushes today",
@@ -290,6 +322,20 @@ const text = {
       duration: "Length",
       source: "Source",
       action: "Action"
+    },
+    searchState: {
+      idle: "Type keywords, then press Enter or click Search",
+      searching: "Searching for \"{keyword}\"...",
+      done: "Search finished: {count} songs found",
+      empty: "No results for \"{keyword}\". Try another keyword.",
+      error: "Search failed: {error}",
+      added: "Added to playlist: {title}",
+      duplicate: "This song is already in the playlist"
+    },
+    playlist: {
+      empty: "Playlist is empty",
+      hint: "Add songs from search results, then switch tracks here",
+      count: "{count} songs"
     },
     empty: {
       noSong: "No song",
@@ -373,6 +419,31 @@ function songArtist(song: Song | null | undefined): string {
   return song?.artist || "--";
 }
 
+function songKey(song: Song | null | undefined): string {
+  return [
+    song?.provider || "coco",
+    song?.id || "",
+    song?.title || "",
+    song?.artist || ""
+  ].join("|");
+}
+
+function formatMessage(template: string, values: Record<string, string | number>): string {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)),
+    template
+  );
+}
+
+function loadPlaylist(): Song[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(playlistStorageKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((song) => song && typeof song === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function CocoXiaoMusic() {
   const [activeNav, setActiveNav] = useState<NavItem>("overview");
   const [theme, setTheme] = useState<Theme>("light");
@@ -383,6 +454,10 @@ export default function CocoXiaoMusic() {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [searchFeedback, setSearchFeedback] = useState<SearchFeedback | null>(null);
+  const [playlist, setPlaylist] = useState<Song[]>(loadPlaylist);
+  const [playlistIndex, setPlaylistIndex] = useState(-1);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string>(t.message.connecting);
   const [dialog, setDialog] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
@@ -419,6 +494,7 @@ export default function CocoXiaoMusic() {
   const activeDeviceName =
     devices.find((device) => manualTargetDids.has(device.did))?.name || devices[0]?.name || t.status.noDevice;
   const targetDevice = devices.find((device) => manualTargetDids.has(device.did)) || devices[0];
+  const selectedResult = results[selectedIndex]?.item;
   const today = new Date().toISOString().slice(0, 10);
   const todayPushes = events.filter((event) => event.at?.startsWith(today) && Boolean(event.song)).length;
   const voiceHits = events.filter((event) => event.keyword || event.message.includes("语音") || event.message.includes("关键词")).length;
@@ -466,6 +542,12 @@ export default function CocoXiaoMusic() {
       setLocalVolume(Math.max(0, Math.min(100, Math.round(status.last_volume))));
     }
   }, [status.last_volume]);
+
+  useEffect(() => {
+    localStorage.setItem(playlistStorageKey, JSON.stringify(playlist));
+    if (playlist.length === 0) setPlaylistIndex(-1);
+    else if (playlistIndex >= playlist.length) setPlaylistIndex(playlist.length - 1);
+  }, [playlist, playlistIndex]);
 
   function hydrateForms(next: AppStatus, force = false) {
     const settings = next.settings ?? {};
@@ -546,18 +628,82 @@ export default function CocoXiaoMusic() {
   async function doSearch() {
     const keyword = query.trim();
     if (!keyword) return;
-    await run(async () => {
+    setSearching(true);
+    setBusy(true);
+    setSearchFeedback({
+      tone: "info",
+      message: formatMessage(t.searchState.searching, { keyword })
+    });
+    try {
       const items = await search(keyword);
       setResults(items);
       setSelectedIndex(0);
-      return { success: true };
-    }, `搜索完成：${keyword}`);
+      setSearchFeedback({
+        tone: items.length > 0 ? "success" : "warn",
+        message: items.length > 0
+          ? formatMessage(t.searchState.done, { count: items.length })
+          : formatMessage(t.searchState.empty, { keyword })
+      });
+    } catch (error) {
+      const message = String(error);
+      setSearchFeedback({
+        tone: "error",
+        message: formatMessage(t.searchState.error, { error: message })
+      });
+      setToast(message);
+    } finally {
+      setSearching(false);
+      setBusy(false);
+    }
   }
 
   async function doPlayKeyword() {
     const keyword = query.trim();
     if (!keyword) return;
     await run(() => playKeyword(keyword), "已发送播放请求");
+  }
+
+  function addToPlaylist(song: Song | null | undefined) {
+    if (!song?.title) return;
+    if (playlist.some((item) => songKey(item) === songKey(song))) {
+      setSearchFeedback({ tone: "warn", message: t.searchState.duplicate });
+      return;
+    }
+    setPlaylist([...playlist, song]);
+    setSearchFeedback({
+      tone: "success",
+      message: formatMessage(t.searchState.added, { title: song.title })
+    });
+  }
+
+  function removeFromPlaylist(index: number) {
+    setPlaylist(playlist.filter((_, itemIndex) => itemIndex !== index));
+    if (playlistIndex === index) setPlaylistIndex(-1);
+    else if (playlistIndex > index) setPlaylistIndex(playlistIndex - 1);
+  }
+
+  async function playPlaylistItem(index: number) {
+    const song = playlist[index];
+    if (!song) return;
+    setPlaylistIndex(index);
+    await run(() => playSelected(song), "已推送播放列表歌曲");
+  }
+
+  async function playNextPlaylist() {
+    if (playlist.length === 0) return;
+    const nextIndex = playlistIndex >= 0 ? (playlistIndex + 1) % playlist.length : 0;
+    await playPlaylistItem(nextIndex);
+  }
+
+  async function playPreviousPlaylist() {
+    if (playlist.length === 0) return;
+    const nextIndex = playlistIndex > 0 ? playlistIndex - 1 : playlist.length - 1;
+    await playPlaylistItem(nextIndex);
+  }
+
+  function clearPlaylist() {
+    setPlaylist([]);
+    setPlaylistIndex(-1);
   }
 
   async function togglePlayback() {
@@ -803,29 +949,58 @@ export default function CocoXiaoMusic() {
           )}
 
           {activeNav === "search" && (
-            <div>
+            <div className="grid grid-cols-[minmax(0,1fr)_340px] gap-4">
+              <section className="min-w-0">
               <div className="relative mb-4">
                 <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => event.key === "Enter" && doSearch()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      doSearch();
+                    }
+                  }}
                   placeholder={t.placeholder.search}
                   className="h-11 rounded-[10px] pl-11 pr-48 text-[13px]"
                 />
                 <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-2">
-                  <Button onClick={doPlayKeyword} disabled={busy || !query.trim()} size="sm">
-                    {t.action.playBest}
-                  </Button>
-                  <Button onClick={doSearch} disabled={busy || !query.trim()} variant="secondary" size="sm">
+                  <Button onClick={doSearch} disabled={searching || !query.trim()} size="sm">
+                    {searching && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     {t.action.search}
+                  </Button>
+                  <Button onClick={doPlayKeyword} disabled={busy || !query.trim()} variant="secondary" size="sm">
+                    {t.action.playBest}
                   </Button>
                 </div>
               </div>
 
+              <div
+                className={cn(
+                  "mb-4 flex items-center justify-between rounded-[10px] border px-4 py-3 text-[13px] shadow-sm",
+                  !searchFeedback && "border-violet-500/20 bg-violet-500/10 text-violet-600 dark:text-violet-300",
+                  searchFeedback?.tone === "info" && "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-300",
+                  searchFeedback?.tone === "success" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+                  searchFeedback?.tone === "warn" && "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300",
+                  searchFeedback?.tone === "error" && "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300"
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  <span className="truncate font-medium">{searchFeedback?.message ?? t.searchState.idle}</span>
+                </div>
+                {selectedResult && (
+                  <Button variant="secondary" size="sm" onClick={() => addToPlaylist(selectedResult)}>
+                    <Plus className="h-3.5 w-3.5" />
+                    {t.action.addToPlaylist}
+                  </Button>
+                )}
+              </div>
+
               <div className="overflow-hidden rounded-[10px] border border-border bg-card">
                 {results.length > 0 && (
-                  <div className="grid grid-cols-[44px_54px_minmax(220px,1.8fr)_minmax(120px,1fr)_88px_92px_86px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-3 text-[11px] font-medium text-zinc-500">
+                  <div className="grid grid-cols-[40px_50px_minmax(180px,1.6fr)_minmax(100px,1fr)_74px_78px_128px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-3 text-[11px] font-medium text-zinc-500">
                     <span className="text-right font-mono">{t.table.index}</span>
                     <span>{t.table.cover}</span>
                     <span>{t.table.song}</span>
@@ -846,11 +1021,11 @@ export default function CocoXiaoMusic() {
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         setSelectedIndex(index);
-                        run(() => playSelected(result.item), "已推送选中歌曲");
+                        addToPlaylist(result.item);
                       }
                     }}
                     className={cn(
-                      "group grid min-h-[68px] w-full grid-cols-[44px_54px_minmax(220px,1.8fr)_minmax(120px,1fr)_88px_92px_86px] items-center gap-3 border-b border-border px-4 text-left transition-colors last:border-0 hover:bg-muted/60",
+                      "group grid min-h-[68px] w-full grid-cols-[40px_50px_minmax(180px,1.6fr)_minmax(100px,1fr)_74px_78px_128px] items-center gap-3 border-b border-border px-4 text-left transition-colors last:border-0 hover:bg-muted/60",
                       selectedIndex === index && "bg-violet-500/10"
                     )}
                   >
@@ -867,19 +1042,84 @@ export default function CocoXiaoMusic() {
                     <div className="flex justify-center">
                       <Badge variant="outline">{result.item.provider || "coco"}</Badge>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        run(() => playSelected(result.item), "已推送选中歌曲");
-                      }}
-                      className="opacity-0 group-hover:opacity-100"
-                    >
-                      {t.action.push}
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="icon-sm"
+                        variant="secondary"
+                        title={t.action.addToPlaylist}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addToPlaylist(result.item);
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          run(() => playSelected(result.item), "已推送选中歌曲");
+                        }}
+                      >
+                        {t.action.push}
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
+              </section>
+
+              <aside className="min-w-0 rounded-[10px] border border-border bg-card">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ListMusic className="h-4 w-4 text-violet-500" />
+                    <div className="min-w-0">
+                      <h2 className="truncate text-[14px] font-semibold">{t.label.playlist}</h2>
+                      <p className="text-[11px] text-zinc-500">{formatMessage(t.playlist.count, { count: playlist.length })}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button variant="secondary" size="icon-sm" disabled={playlist.length === 0 || busy} title={t.action.playAll} onClick={() => playPlaylistItem(playlistIndex >= 0 ? playlistIndex : 0)}>
+                      <Play className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon-sm" disabled={playlist.length === 0} title={t.action.clearPlaylist} onClick={clearPlaylist}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="max-h-[calc(100vh-310px)] overflow-y-auto p-3">
+                  {playlist.length === 0 && (
+                    <div className="rounded-[10px] border border-dashed border-border p-5 text-center">
+                      <ListMusic className="mx-auto mb-2 h-6 w-6 text-zinc-400" />
+                      <p className="text-[13px] font-medium">{t.playlist.empty}</p>
+                      <p className="mt-1 text-[12px] text-zinc-500">{t.playlist.hint}</p>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    {playlist.map((song, index) => (
+                      <div
+                        key={`${songKey(song)}-${index}`}
+                        className={cn(
+                          "group flex items-center gap-3 rounded-[10px] border border-border p-2 transition-colors hover:bg-muted/60",
+                          playlistIndex === index && "border-violet-500/30 bg-violet-500/10"
+                        )}
+                      >
+                        <CoverArt song={song} className="h-10 w-10" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium">{song.title || "--"}</p>
+                          <p className="truncate text-[12px] text-zinc-500">{song.artist || "--"}</p>
+                        </div>
+                        <Button variant="ghost" size="icon-sm" disabled={busy} title={t.action.push} onClick={() => playPlaylistItem(index)}>
+                          <Play className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" title={t.action.remove} onClick={() => removeFromPlaylist(index)}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </aside>
             </div>
           )}
 
@@ -1092,12 +1332,12 @@ export default function CocoXiaoMusic() {
 
           <div className="flex w-[44%] flex-col items-center gap-2">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon-sm" disabled><SkipBack className="h-4 w-4" /></Button>
+              <Button variant="ghost" size="icon-sm" disabled={playlist.length === 0 || busy} onClick={playPreviousPlaylist}><SkipBack className="h-4 w-4" /></Button>
               <Button onClick={togglePlayback} disabled={busy} size="icon-sm" className="h-10 w-10 rounded-full">
                 {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
               </Button>
               <Button onClick={() => run(stopPlayback, "已停止")} disabled={busy} variant="ghost" size="icon-sm"><Square className="h-3.5 w-3.5" /></Button>
-              <Button variant="ghost" size="icon-sm" disabled><SkipForward className="h-4 w-4" /></Button>
+              <Button variant="ghost" size="icon-sm" disabled={playlist.length === 0 || busy} onClick={playNextPlaylist}><SkipForward className="h-4 w-4" /></Button>
             </div>
             <div className="flex w-full max-w-2xl items-center gap-3">
               <span className="w-10 text-right text-[11px] text-zinc-500">{formatTime(position)}</span>
