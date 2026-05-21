@@ -1088,8 +1088,11 @@ class CocoXiaoMusicService:
             except OSError:
                 await asyncio.sleep(2)
 
-    async def search_preview(self, keyword: str):
+    async def search_preview(self, keyword: str, providers: list[str] | None = None):
         songs = await asyncio.get_running_loop().run_in_executor(None, self.coco.search_items, keyword, None)
+        allowed_providers = {str(provider).strip().lower() for provider in providers or [] if str(provider).strip()}
+        if allowed_providers:
+            songs = [song for song in songs if (song.provider or "").lower() in allowed_providers]
         loop = asyncio.get_running_loop()
         enrich_count = min(len(songs), 80)
         enrich_tasks = [loop.run_in_executor(None, self.coco.resolve_info, song) for song in songs[:enrich_count]]

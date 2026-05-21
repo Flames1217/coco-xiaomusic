@@ -28,6 +28,8 @@ struct AppState {
 #[derive(Debug, Deserialize)]
 struct KeywordPayload {
     keyword: String,
+    #[serde(default)]
+    providers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -380,7 +382,7 @@ async fn get_events(limit: Option<u16>, state: State<'_, AppState>) -> Result<Va
 #[tauri::command]
 async fn search(payload: KeywordPayload, state: State<'_, AppState>) -> Result<Value, String> {
     state
-        .post("/search", json!({ "keyword": payload.keyword }))
+        .post("/search", json!({ "keyword": payload.keyword, "providers": payload.providers }))
         .await
 }
 

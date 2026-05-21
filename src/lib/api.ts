@@ -10,8 +10,8 @@ export async function getEvents(limit = 120): Promise<EventItem[]> {
   return response.items ?? [];
 }
 
-export async function search(keyword: string): Promise<SearchItem[]> {
-  const response = await invoke<{ items: SearchItem[] }>("search", { payload: { keyword } });
+export async function search(keyword: string, providers: string[] = []): Promise<SearchItem[]> {
+  const response = await invoke<{ items: SearchItem[] }>("search", { payload: { keyword, providers } });
   return response.items ?? [];
 }
 

@@ -31,6 +31,7 @@ class DevicesRequest(BaseModel):
 
 class KeywordRequest(BaseModel):
     keyword: str = ""
+    providers: list[str] = Field(default_factory=list)
 
 
 class PlaySelectedRequest(BaseModel):
@@ -138,7 +139,7 @@ async def search(request: KeywordRequest):
     keyword = request.keyword.strip()
     if not keyword:
         return {"items": []}
-    return await service.search_preview(keyword)
+    return await service.search_preview(keyword, request.providers)
 
 
 @app.post("/play/keyword", dependencies=[Depends(require_token)])

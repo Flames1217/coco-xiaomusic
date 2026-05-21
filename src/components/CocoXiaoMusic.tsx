@@ -86,6 +86,7 @@ type ActionResult = { success?: boolean; error?: string; [key: string]: unknown 
 type SearchFeedback = { tone: "info" | "success" | "warn" | "error"; message: string };
 
 const playlistStorageKey = "coco-playlist";
+const presetProviders = ["qq", "netease", "kugou", "kuwo", "migu", "gequhai", "bilibili"];
 
 const defaultKeywords = ["播放", "放一首", "来一首", "唱", "coco"];
 
@@ -118,6 +119,7 @@ const text = {
       search: "搜索",
       push: "推送",
       addToPlaylist: "加入列表",
+      inPlaylist: "已加入",
       playAll: "播放列表",
       clearPlaylist: "清空列表",
       remove: "移除",
@@ -144,6 +146,7 @@ const text = {
       recentCommand: "最近口令",
       searchFeedback: "搜索状态",
       searchResults: "搜索结果",
+      searchProviders: "搜索渠道",
       providerFilter: "渠道筛选",
       playlist: "播放列表",
       recentPush: "最近推送",
@@ -261,6 +264,7 @@ const text = {
       search: "Search",
       push: "Push",
       addToPlaylist: "Add",
+      inPlaylist: "Added",
       playAll: "Play list",
       clearPlaylist: "Clear list",
       remove: "Remove",
@@ -287,6 +291,7 @@ const text = {
       recentCommand: "Last command",
       searchFeedback: "Search status",
       searchResults: "Search results",
+      searchProviders: "Search providers",
       providerFilter: "Provider filter",
       playlist: "Playlist",
       recentPush: "Recent pushes",
@@ -458,6 +463,7 @@ export default function CocoXiaoMusic() {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [providerFilter, setProviderFilter] = useState("all");
   const [searching, setSearching] = useState(false);
   const [searchFeedback, setSearchFeedback] = useState<SearchFeedback | null>(null);
@@ -512,6 +518,9 @@ export default function CocoXiaoMusic() {
     return results.filter((result) => (result.item.provider || "coco") === providerFilter);
   }, [providerFilter, results]);
   const selectedResult = filteredResults[selectedIndex]?.item;
+  const playlistKeys = useMemo(() => new Set(playlist.map((song) => songKey(song))), [playlist]);
+  const selectedResultInPlaylist = selectedResult ? playlistKeys.has(songKey(selectedResult)) : false;
+  const activeSearchProviders = useMemo(() => [...selectedProviders], [selectedProviders]);
   const today = new Date().toISOString().slice(0, 10);
   const todayPushes = events.filter((event) => event.at?.startsWith(today) && Boolean(event.song)).length;
   const voiceHits = events.filter((event) => event.keyword || event.message.includes("语音") || event.message.includes("关键词")).length;
@@ -656,7 +665,7 @@ export default function CocoXiaoMusic() {
       message: formatMessage(t.searchState.searching, { keyword })
     });
     try {
-      const items = await search(keyword);
+      const items = await search(keyword, activeSearchProviders);
       setResults(items);
       setProviderFilter("all");
       setSelectedIndex(0);
@@ -696,6 +705,13 @@ export default function CocoXiaoMusic() {
       tone: "success",
       message: formatMessage(t.searchState.added, { title: song.title })
     });
+  }
+
+  function toggleSearchProvider(provider: string) {
+    const next = new Set(selectedProviders);
+    if (next.has(provider)) next.delete(provider);
+    else next.add(provider);
+    setSelectedProviders(next);
   }
 
   function removeFromPlaylist(index: number) {
@@ -872,7 +888,6 @@ export default function CocoXiaoMusic() {
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <header className="flex h-12 items-center justify-between border-b border-border px-5">
           <div className="flex items-center gap-3">
-            <span className="text-[13px] font-medium">{readyLabel}</span>
             {busy && <Loader2 className="h-4 w-4 animate-spin text-violet-500" />}
           </div>
           <div className="flex items-center gap-2">
@@ -998,6 +1013,37 @@ export default function CocoXiaoMusic() {
                 </div>
               </div>
 
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-card px-3 py-2">
+                <span className="mr-1 text-[12px] text-zinc-500">{t.label.searchProviders}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProviders(new Set())}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
+                    selectedProviders.size === 0
+                      ? "bg-violet-500 text-white"
+                      : "bg-muted text-zinc-500 hover:text-foreground"
+                  )}
+                >
+                  {t.action.all}
+                </button>
+                {presetProviders.map((provider) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => toggleSearchProvider(provider)}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      selectedProviders.has(provider)
+                        ? "bg-violet-500 text-white"
+                        : "bg-muted text-zinc-500 hover:text-foreground"
+                    )}
+                  >
+                    {provider}
+                  </button>
+                ))}
+              </div>
+
               <div
                 className={cn(
                   "mb-4 flex items-center justify-between rounded-[10px] border px-4 py-3 text-[13px] shadow-sm",
@@ -1012,7 +1058,7 @@ export default function CocoXiaoMusic() {
                   {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   <span className="truncate font-medium">{searchFeedback?.message ?? t.searchState.idle}</span>
                 </div>
-                {selectedResult && (
+                {selectedResult && !selectedResultInPlaylist && (
                   <Button variant="secondary" size="sm" onClick={() => addToPlaylist(selectedResult)}>
                     <Plus className="h-3.5 w-3.5" />
                     {t.action.addToPlaylist}
@@ -1099,17 +1145,21 @@ export default function CocoXiaoMusic() {
                       <Badge variant="outline">{result.item.provider || "coco"}</Badge>
                     </div>
                     <div className="flex justify-end gap-1">
-                      <Button
-                        size="icon-sm"
-                        variant="secondary"
-                        title={t.action.addToPlaylist}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          addToPlaylist(result.item);
-                        }}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
+                      {playlistKeys.has(songKey(result.item)) ? (
+                        <Badge variant="secondary" className="h-8 px-2 text-[11px]">{t.action.inPlaylist}</Badge>
+                      ) : (
+                        <Button
+                          size="icon-sm"
+                          variant="secondary"
+                          title={t.action.addToPlaylist}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            addToPlaylist(result.item);
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         onClick={(event) => {
