@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity,
   ArrowDown,
@@ -161,6 +162,15 @@ const text = {
       rename: "命名",
       pushTo: "推送至"
     },
+    table: {
+      index: "#",
+      cover: "封面",
+      song: "歌曲",
+      artist: "歌手",
+      duration: "时长",
+      source: "来源",
+      action: "操作"
+    },
     empty: {
       noSong: "暂无歌曲",
       noCommand: "暂无",
@@ -271,6 +281,15 @@ const text = {
       saveAlias: "Save alias",
       rename: "Rename",
       pushTo: "Push to"
+    },
+    table: {
+      index: "#",
+      cover: "Cover",
+      song: "Song",
+      artist: "Artist",
+      duration: "Length",
+      source: "Source",
+      action: "Action"
     },
     empty: {
       noSong: "No song",
@@ -427,6 +446,9 @@ export default function CocoXiaoMusic() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.classList.toggle("dark", isDark);
+    if ("__TAURI_INTERNALS__" in window) {
+      getCurrentWindow().setTheme(isDark ? "dark" : "light").catch(() => undefined);
+    }
   }, [isDark, theme]);
 
   useEffect(() => {
@@ -802,24 +824,49 @@ export default function CocoXiaoMusic() {
               </div>
 
               <div className="overflow-hidden rounded-[10px] border border-border bg-card">
+                {results.length > 0 && (
+                  <div className="grid grid-cols-[44px_54px_minmax(220px,1.8fr)_minmax(120px,1fr)_88px_92px_86px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-3 text-[11px] font-medium text-zinc-500">
+                    <span className="text-right font-mono">{t.table.index}</span>
+                    <span>{t.table.cover}</span>
+                    <span>{t.table.song}</span>
+                    <span>{t.table.artist}</span>
+                    <span className="text-center">{t.table.duration}</span>
+                    <span className="text-center">{t.table.source}</span>
+                    <span className="text-right">{t.table.action}</span>
+                  </div>
+                )}
                 {results.length === 0 && <Empty className="p-8">{t.empty.noSearch}</Empty>}
                 {results.map((result, index) => (
-                  <button
+                  <div
                     key={`${result.item.provider}-${result.item.id}-${index}`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedIndex(index)}
                     onDoubleClick={() => run(() => playSelected(result.item), "已推送选中歌曲")}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        setSelectedIndex(index);
+                        run(() => playSelected(result.item), "已推送选中歌曲");
+                      }
+                    }}
                     className={cn(
-                      "group flex h-[56px] w-full items-center gap-4 border-b border-border px-4 text-left transition-colors last:border-0 hover:bg-muted/60",
+                      "group grid min-h-[68px] w-full grid-cols-[44px_54px_minmax(220px,1.8fr)_minmax(120px,1fr)_88px_92px_86px] items-center gap-3 border-b border-border px-4 text-left transition-colors last:border-0 hover:bg-muted/60",
                       selectedIndex === index && "bg-violet-500/10"
                     )}
                   >
-                    <span className="w-6 text-right font-mono text-[12px] text-zinc-500">{String(index + 1).padStart(2, "0")}</span>
-                    <div className="min-w-0 flex-1">
+                    <span className="text-right font-mono text-[12px] text-zinc-500">{String(index + 1).padStart(2, "0")}</span>
+                    <CoverArt song={result.item} className="h-11 w-11" />
+                    <div className="min-w-0">
                       <p className="truncate text-[13px] font-medium">{result.item.title || "--"}</p>
-                      <p className="truncate text-[12px] text-zinc-500">{result.item.artist || "--"}</p>
+                      <p className="truncate text-[12px] text-zinc-500">{result.item.album || "--"}</p>
                     </div>
-                    <Badge variant="secondary">{durationText(result.item.duration)}</Badge>
-                    <Badge variant="outline">{result.item.provider || "coco"}</Badge>
+                    <span className="truncate text-[12px] text-zinc-500">{result.item.artist || "--"}</span>
+                    <div className="flex justify-center">
+                      <Badge variant="secondary">{durationText(result.item.duration)}</Badge>
+                    </div>
+                    <div className="flex justify-center">
+                      <Badge variant="outline">{result.item.provider || "coco"}</Badge>
+                    </div>
                     <Button
                       size="sm"
                       onClick={(event) => {
@@ -830,7 +877,7 @@ export default function CocoXiaoMusic() {
                     >
                       {t.action.push}
                     </Button>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1036,9 +1083,7 @@ export default function CocoXiaoMusic() {
 
         <footer className="absolute bottom-0 left-0 right-0 flex h-24 items-center border-t border-border bg-card px-5 py-3">
           <div className="flex w-[28%] min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-violet-500/20">
-              <Headphones className="h-5 w-5 text-violet-500" />
-            </div>
+            <CoverArt song={currentSong ?? undefined} className="h-11 w-11" fallbackIcon={<Headphones className="h-5 w-5 text-violet-500" />} />
             <div className="min-w-0">
               <p className="truncate text-[14px] font-medium">{currentSong?.title || t.empty.noSong}</p>
               <p className="truncate text-[12px] text-zinc-500">{songArtist(currentSong)}</p>
@@ -1109,6 +1154,36 @@ function Metric({ title, value, icon }: { title: string; value: string; icon: Re
 
 function Empty({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={cn("text-center text-[13px] text-zinc-500", className)}>{children}</div>;
+}
+
+function CoverArt({
+  song,
+  className = "",
+  fallbackIcon
+}: {
+  song?: Song | null;
+  className?: string;
+  fallbackIcon?: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  const cover = song?.cover?.trim();
+  const showImage = Boolean(cover && !failed);
+
+  return (
+    <div className={cn("relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-violet-500/15 text-violet-500", className)}>
+      {showImage ? (
+        <img
+          src={cover}
+          alt={song?.title || "cover"}
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        fallbackIcon ?? <Music2 className="h-4 w-4" />
+      )}
+    </div>
+  );
 }
 
 function DeviceRow({
