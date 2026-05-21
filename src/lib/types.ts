@@ -78,3 +78,19 @@ export interface AppStatus {
   devices?: Device[];
   settings?: SettingsPublic;
 }
+
+export interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_name: string;
+  notes: string;
+  published_at: string;
+  html_url: string;
+  portable_url: string;
+  portable_name: string;
+  installer_url: string;
+  installer_name: string;
+  portable_size: number;
+  installer_size: number;
+}

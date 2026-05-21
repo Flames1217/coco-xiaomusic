@@ -1,40 +1,80 @@
 # coco-xiaomusic
 
-coco-xiaomusic is a lightweight Windows desktop controller for routing XiaoAI song requests through a coco-downloader music source.
+coco-xiaomusic 是一个 Windows 10/11 桌面应用，用来把小爱音箱的点歌、搜歌、播放控制接到 coco 音乐搜索服务。
 
-The app is rebuilt from scratch with:
+## 主要能力
 
-- Tauri 2 and Rust for the desktop shell
-- Svelte and TypeScript for the UI
-- A Python FastAPI backend service for XiaoMusic, coco search, playback control, and LAN audio streaming
+- 小米账号登录、授权验证、设备发现和设备别名。
+- coco 多渠道搜索、渠道预选、搜索结果筛选、封面展示。
+- 手动推送、播放列表、上一首、下一首、暂停、继续、停止、进度和音量控制。
+- 小爱音箱语音接管，可按关键词接管或全量接管。
+- 右下角系统托盘控制：打开主窗口、播放/暂停、上一首、下一首、播放列表点歌、退出应用并关闭服务。
+- 应用内检查 GitHub Release 新版本，显示更新日志，下载便携更新包后自动覆盖并重启。
+- 所有运行数据、缓存、日志、临时更新文件都保存在应用目录内的 `runtime/`，不主动写入用户的 C 盘配置目录。
 
-## Development
+## 技术栈
 
-Prerequisites:
+- Tauri 2 + Rust：桌面窗口、托盘、进程管理、更新下载和本地命令。
+- React + TypeScript：桌面控制台界面。
+- Python FastAPI：XiaoMusic 集成、coco 搜索、播放控制和局域网音频流服务。
 
-- Rust stable with the `x86_64-pc-windows-msvc` target
-- Visual Studio 2022 Build Tools with **Desktop development with C++** and the Windows 10/11 SDK
-- Node.js, pnpm, and Python 3.11+
+## 目录说明
 
-Install frontend dependencies:
+- `src-tauri/`：Rust/Tauri 主程序。
+- `src/`：前端界面。
+- `sidecar/`：Python 后台服务。
+- `assets/`：应用图标和 logo。
+- `runtime/`：运行时数据目录，首次启动自动创建。
+
+## 运行时数据
+
+应用启动时会把以下环境变量指向应用目录内的 `runtime/`，避免把状态、缓存和临时文件写到系统盘用户目录：
+
+- `COCO_XIAOMUSIC_HOME`
+- `TEMP`
+- `TMP`
+- `HOME`
+- `USERPROFILE`
+- `APPDATA`
+- `LOCALAPPDATA`
+- `XDG_CACHE_HOME`
+- `PIP_CACHE_DIR`
+- `PYTHONPYCACHEPREFIX`
+
+常见数据位置：
+
+- `runtime/data/app_settings.json`：账号、设备、策略、音量、关闭偏好等配置。
+- `runtime/data/app_prefs.json`：应用级偏好。
+- `runtime/conf/`：小米登录 token。
+- `runtime/music/tmp/`：临时音频。
+- `runtime/music/cache/`：音频缓存。
+- `runtime/logs/`：后台日志。
+- `runtime/update/`：应用内更新下载和临时解压目录。
+- `runtime/webview/`：Tauri WebView 本地数据。
+
+## 开发环境
+
+需要：
+
+- Rust stable，Windows MSVC 工具链。
+- Node.js、pnpm。
+- Python 3.11+。
+- Windows 上可用的 C++ 构建工具。
+
+安装依赖：
 
 ```powershell
 pnpm install
-```
-
-Install backend service dependencies:
-
-```powershell
 python -m pip install -r .\sidecar\requirements.txt
 ```
 
-Run the desktop app:
+开发运行：
 
 ```powershell
 pnpm tauri:dev
 ```
 
-Useful checks:
+常用检查：
 
 ```powershell
 pnpm check
@@ -45,12 +85,25 @@ cd ..
 python -m py_compile (Get-ChildItem .\sidecar -Recurse -Filter *.py).FullName
 ```
 
-## Runtime Data
+## 打包发布
 
-Tauri launches the Python backend service with `COCO_XIAOMUSIC_HOME` pointing to `runtime/` inside the project or portable app directory. It also points Python temp, cache, appdata, and pycache variables into that same runtime directory so normal app usage does not write coco-xiaomusic state to the Windows user profile on `C:`.
+生成 release 可执行文件：
 
-- `runtime/data/app_settings.json`
-- `runtime/conf/`
-- `runtime/music/tmp/`
-- `runtime/music/cache/`
-- `runtime/logs/`
+```powershell
+pnpm tauri build --no-bundle
+```
+
+生成安装包：
+
+```powershell
+pnpm tauri build --bundles nsis
+```
+
+便携版发布包需要包含：
+
+- `coco-xiaomusic.exe`
+- `sidecar/`
+- `assets/`
+- `README.md`
+
+应用内自动更新会优先下载 GitHub Release 中名称包含 `portable` 的 zip 包，并在应用目录内完成覆盖和重启。

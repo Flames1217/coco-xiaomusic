@@ -7,6 +7,7 @@ import {
   Check,
   Clock,
   Copy,
+  Download,
   ExternalLink,
   Headphones,
   Home,
@@ -33,10 +34,12 @@ import {
   Square,
   Sun,
   Trash2,
+  UploadCloud,
   Volume2,
   X
 } from "lucide-react";
 import {
+  checkForUpdates,
   clearEvents,
   getEvents,
   getStatus,
@@ -55,9 +58,10 @@ import {
   setVolume,
   syncTrayPlaylist,
   testCocoConnection,
+  installUpdate,
   stopPlayback
 } from "../lib/api";
-import type { AppStatus, Device, EventItem, SearchItem, Song } from "../lib/types";
+import type { AppStatus, Device, EventItem, SearchItem, Song, UpdateInfo } from "../lib/types";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -90,6 +94,7 @@ type ActionResult = { success?: boolean; error?: string; [key: string]: unknown 
 type SearchFeedback = { tone: "info" | "success" | "warn" | "error"; message: string };
 
 const playlistStorageKey = "coco-playlist";
+const volumeStorageKey = "coco-last-volume";
 const presetProviders = [
   { id: "geba", label: "歌曲宝" },
   { id: "gequhai", label: "歌曲海" },
@@ -494,6 +499,12 @@ function formatMessage(template: string, values: Record<string, string | number>
   );
 }
 
+function formatFileSize(value: number): string {
+  if (!value) return "--";
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function loadPlaylist(): Song[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(playlistStorageKey) || "[]");
@@ -503,10 +514,15 @@ function loadPlaylist(): Song[] {
   }
 }
 
+function loadSavedVolume(): number {
+  const value = Number(localStorage.getItem(volumeStorageKey) ?? 50);
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 50;
+}
+
 export default function CocoXiaoMusic() {
   const [activeNav, setActiveNav] = useState<NavItem>("overview");
   const [theme, setTheme] = useState<Theme>("light");
-  const [language, setLanguage] = useState<Language>(() => (localStorage.getItem("coco-language") === "en" ? "en" : "zh"));
+  const [language] = useState<Language>("zh");
   const t = text[language];
   const [status, setStatus] = useState<AppStatus>({});
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -524,9 +540,13 @@ export default function CocoXiaoMusic() {
   const [dialog, setDialog] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [rememberCloseChoice, setRememberCloseChoice] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateRead, setUpdateRead] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [autoScroll, setAutoScroll] = useState(true);
-  const [volume, setLocalVolume] = useState(50);
+  const [volume, setLocalVolume] = useState(loadSavedVolume);
   const [progress, setProgress] = useState(0);
   const [account, setAccount] = useState("");
   const [password, setPasswordValue] = useState("");
@@ -545,6 +565,7 @@ export default function CocoXiaoMusic() {
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const formsHydrated = useRef(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const updateCheckedRef = useRef(false);
 
   const isDark = theme === "dark";
   const closeCopy = language === "zh"
@@ -632,9 +653,15 @@ export default function CocoXiaoMusic() {
 
   useEffect(() => {
     if (typeof status.last_volume === "number") {
-      setLocalVolume(Math.max(0, Math.min(100, Math.round(status.last_volume))));
+      const nextVolume = Math.max(0, Math.min(100, Math.round(status.last_volume)));
+      setLocalVolume(nextVolume);
+      localStorage.setItem(volumeStorageKey, String(nextVolume));
     }
   }, [status.last_volume]);
+
+  useEffect(() => {
+    localStorage.setItem(volumeStorageKey, String(volume));
+  }, [volume]);
 
   useEffect(() => {
     localStorage.setItem(playlistStorageKey, JSON.stringify(playlist));
@@ -673,6 +700,22 @@ export default function CocoXiaoMusic() {
   }, []);
 
   useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window) || updateCheckedRef.current) return;
+    updateCheckedRef.current = true;
+    window.setTimeout(() => {
+      checkForUpdates()
+        .then((info) => {
+          if (info.has_update) {
+            setUpdateInfo(info);
+            setUpdateRead(false);
+            setUpdateDialogOpen(true);
+          }
+        })
+        .catch(() => undefined);
+    }, 2500);
+  }, []);
+
+  useEffect(() => {
     setSelectedIndex(0);
   }, [providerFilter]);
 
@@ -697,11 +740,6 @@ export default function CocoXiaoMusic() {
     formsHydrated.current = true;
   }
 
-  function switchLanguage(next: Language) {
-    setLanguage(next);
-    localStorage.setItem("coco-language", next);
-  }
-
   function showDialog(title: string, message: string, tone: "success" | "error" = "success") {
     setDialog({ title, message, tone });
   }
@@ -711,6 +749,20 @@ export default function CocoXiaoMusic() {
       await handleCloseChoice(behavior, rememberCloseChoice);
       setClosePromptOpen(false);
     } catch (error) {
+      setToast(String(error));
+    }
+  }
+
+  async function startUpdateInstall() {
+    if (!updateInfo?.portable_url) {
+      setToast("当前版本没有可用的便携更新包，请到 GitHub Release 页面手动下载。");
+      return;
+    }
+    setUpdating(true);
+    try {
+      await installUpdate(updateInfo.portable_url);
+    } catch (error) {
+      setUpdating(false);
       setToast(String(error));
     }
   }
@@ -997,20 +1049,6 @@ export default function CocoXiaoMusic() {
             {busy && <Loader2 className="h-4 w-4 animate-spin text-violet-500" />}
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium">
-              <button
-                onClick={() => switchLanguage("zh")}
-                className={cn("h-7 rounded-full px-2.5", language === "zh" ? "bg-violet-500 text-white" : "text-zinc-500")}
-              >
-                中
-              </button>
-              <button
-                onClick={() => switchLanguage("en")}
-                className={cn("h-7 rounded-full px-2.5", language === "en" ? "bg-violet-500 text-white" : "text-zinc-500")}
-              >
-                EN
-              </button>
-            </div>
             <Button variant="secondary" size="sm" onClick={() => refresh(true)}>
               <RefreshCw className="h-3.5 w-3.5" />
               {t.action.refresh}
@@ -1581,6 +1619,69 @@ export default function CocoXiaoMusic() {
               <p className="whitespace-pre-wrap break-words text-[13px] text-zinc-500">{dialog.message}</p>
               <div className="mt-5 flex justify-end">
                 <Button onClick={() => setDialog(null)}>{t.action.ok}</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {updateDialogOpen && updateInfo && (
+          <div className="absolute inset-0 z-[55] flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-[620px] rounded-[10px] border border-border bg-card p-5 shadow-2xl">
+              <div className="mb-4 flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-500">
+                  <UploadCloud className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-[16px] font-semibold">发现新版本 {updateInfo.latest_version}</h3>
+                  <p className="mt-1 text-[12px] text-zinc-500">
+                    当前版本 {updateInfo.current_version}，更新包将下载到应用目录下的 runtime/update，安装完成后自动重启。
+                  </p>
+                </div>
+              </div>
+
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[10px] border border-border bg-muted/40 p-3">
+                  <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
+                    <Download className="h-4 w-4 text-violet-500" />
+                    便携更新包
+                  </div>
+                  <p className="truncate text-[12px] text-zinc-500">{updateInfo.portable_name || "暂未发布"}</p>
+                  <p className="mt-1 text-[11px] text-zinc-500">{formatFileSize(updateInfo.portable_size)}</p>
+                </div>
+                <div className="rounded-[10px] border border-border bg-muted/40 p-3">
+                  <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
+                    <ScrollText className="h-4 w-4 text-violet-500" />
+                    安装版
+                  </div>
+                  <p className="truncate text-[12px] text-zinc-500">{updateInfo.installer_name || "暂未发布"}</p>
+                  <p className="mt-1 text-[11px] text-zinc-500">{formatFileSize(updateInfo.installer_size)}</p>
+                </div>
+              </div>
+
+              <div className="rounded-[10px] border border-border bg-background">
+                <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-[13px] font-medium">
+                  <ScrollText className="h-4 w-4 text-violet-500" />
+                  更新日志
+                </div>
+                <div className="max-h-[220px] overflow-y-auto whitespace-pre-wrap break-words p-3 text-[12px] leading-6 text-zinc-600 dark:text-zinc-300">
+                  {updateInfo.notes || "本次发布没有填写更新日志。"}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-600 dark:text-zinc-300">
+                  <Checkbox checked={updateRead} onCheckedChange={(checked) => setUpdateRead(checked === true)} />
+                  <span>我已阅读更新日志</span>
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="secondary" onClick={() => setUpdateDialogOpen(false)} disabled={updating}>
+                    稍后提醒
+                  </Button>
+                  <Button onClick={startUpdateInstall} disabled={!updateRead || updating || !updateInfo.portable_url}>
+                    {updating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    立即更新并重启
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

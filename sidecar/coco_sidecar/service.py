@@ -67,6 +67,7 @@ class CocoXiaoMusicService:
         self.settings = settings
         self.coco = CocoClient(settings.coco_base)
         self.state = RuntimeState()
+        self.state.last_volume = max(0, min(100, int(getattr(settings, "last_volume", 50))))
         self.xiaomusic: XiaoMusic | None = None
         self._runner_task: asyncio.Task | None = None
         self._mina_watch_task: asyncio.Task | None = None
@@ -487,6 +488,8 @@ class CocoXiaoMusicService:
             self.state.ready = True
             self.state.starting = False
             self.state.startup_error = ""
+            if self.settings.manual_target_dids:
+                await self.set_volume(self.settings.last_volume)
             self._log("ok", "xiaomusic 服务已就绪")
             self._mina_watch_task = asyncio.create_task(self._watch_mina_latest_ask())
             await self.xiaomusic.run_forever()
@@ -751,7 +754,11 @@ class CocoXiaoMusicService:
         status = target.get("status", {})
         volume = status.get("volume")
         if isinstance(volume, int):
-            self.state.last_volume = max(0, min(100, volume))
+            next_volume = max(0, min(100, volume))
+            self.state.last_volume = next_volume
+            if self.settings.last_volume != next_volume:
+                self.settings.last_volume = next_volume
+                self.settings.save()
         self.state.last_song = song.raw
         self.state.last_duration = self._song_duration_seconds(song.raw or {})
         self.state.last_position = 0.0
@@ -1520,6 +1527,8 @@ class CocoXiaoMusicService:
             return {"success": False, "error": "xiaomusic not ready"}
         volume = max(0, min(100, int(volume)))
         self.state.last_volume = volume
+        self.settings.last_volume = volume
+        self.settings.save()
         targets = self._manual_targets(target_dids)
         results = []
         for did in targets:

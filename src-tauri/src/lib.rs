@@ -136,6 +136,11 @@ struct CocoTestPayload {
     coco_base: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct InstallUpdatePayload {
+    download_url: String,
+}
+
 #[derive(Debug, Serialize)]
 struct SidecarBootstrap {
     base_url: String,
@@ -143,11 +148,45 @@ struct SidecarBootstrap {
     home: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    name: Option<String>,
+    body: Option<String>,
+    html_url: Option<String>,
+    published_at: Option<String>,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+    size: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateInfo {
+    current_version: String,
+    latest_version: String,
+    has_update: bool,
+    release_name: String,
+    notes: String,
+    published_at: String,
+    html_url: String,
+    portable_url: String,
+    portable_name: String,
+    installer_url: String,
+    installer_name: String,
+    portable_size: u64,
+    installer_size: u64,
+}
+
 impl AppState {
     fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(600))
                 .build()
                 .expect("reqwest client"),
             sidecar: Mutex::new(None),
@@ -396,6 +435,90 @@ fn prepare_home() -> Result<PathBuf, String> {
             .map_err(|error| format!("create runtime dir failed: {error}"))?;
     }
     Ok(home)
+}
+
+fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let parse = |value: &str| {
+        value
+            .trim()
+            .trim_start_matches('v')
+            .split(|ch: char| !ch.is_ascii_digit())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.parse::<u32>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    let mut left_parts = parse(left);
+    let mut right_parts = parse(right);
+    let max_len = left_parts.len().max(right_parts.len()).max(3);
+    left_parts.resize(max_len, 0);
+    right_parts.resize(max_len, 0);
+    left_parts.cmp(&right_parts)
+}
+
+fn release_asset<'a>(assets: &'a [GithubAsset], portable: bool) -> Option<&'a GithubAsset> {
+    assets.iter().find(|asset| {
+        let name = asset.name.to_lowercase();
+        if portable {
+            name.contains("portable") && name.ends_with(".zip")
+        } else {
+            (name.contains("setup") || name.contains("installer") || name.contains("安装"))
+                && name.ends_with(".exe")
+        }
+    })
+}
+
+fn safe_download_name(url: &str) -> String {
+    let name = url
+        .rsplit('/')
+        .next()
+        .unwrap_or("coco-xiaomusic-update.zip")
+        .split('?')
+        .next()
+        .unwrap_or("coco-xiaomusic-update.zip")
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+        .collect::<String>();
+    if name.is_empty() {
+        "coco-xiaomusic-update.zip".to_string()
+    } else {
+        name
+    }
+}
+
+fn updater_script() -> &'static str {
+    r#"
+param(
+  [Parameter(Mandatory=$true)][int]$ProcessId,
+  [Parameter(Mandatory=$true)][string]$ZipPath,
+  [Parameter(Mandatory=$true)][string]$AppDir,
+  [Parameter(Mandatory=$true)][string]$ExeName
+)
+$ErrorActionPreference = 'Stop'
+$resolvedAppDir = (Resolve-Path -LiteralPath $AppDir).Path
+$resolvedZip = (Resolve-Path -LiteralPath $ZipPath).Path
+$updateRoot = Join-Path $resolvedAppDir 'runtime\update'
+$stage = Join-Path $updateRoot 'stage'
+try {
+  Wait-Process -Id $ProcessId -Timeout 45 -ErrorAction SilentlyContinue
+} catch {}
+if (Test-Path -LiteralPath $stage) {
+  Remove-Item -LiteralPath $stage -Recurse -Force
+}
+New-Item -ItemType Directory -Path $stage -Force | Out-Null
+Expand-Archive -LiteralPath $resolvedZip -DestinationPath $stage -Force
+$candidate = Get-ChildItem -LiteralPath $stage -Recurse -Filter $ExeName | Select-Object -First 1
+if (-not $candidate) {
+  throw "更新包中没有找到 $ExeName"
+}
+$sourceRoot = $candidate.Directory.FullName
+if (-not $sourceRoot.StartsWith($stage, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "更新包路径异常"
+}
+Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object {
+  Copy-Item -LiteralPath $_.FullName -Destination $resolvedAppDir -Recurse -Force
+}
+Start-Process -FilePath (Join-Path $resolvedAppDir $ExeName) -WorkingDirectory $resolvedAppDir
+"#
 }
 
 fn prefs_path(home: &std::path::Path) -> PathBuf {
@@ -948,6 +1071,121 @@ async fn test_coco_connection(
 }
 
 #[tauri::command]
+async fn check_for_updates(state: State<'_, AppState>) -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let release = state
+        .client
+        .get("https://api.github.com/repos/Flames1217/coco-xiaomusic/releases/latest")
+        .header("User-Agent", "coco-xiaomusic")
+        .send()
+        .await
+        .map_err(|error| format!("检查更新失败: {error}"))?;
+    if !release.status().is_success() {
+        return Err(format!("检查更新失败: GitHub HTTP {}", release.status()));
+    }
+    let release = release
+        .json::<GithubRelease>()
+        .await
+        .map_err(|error| format!("解析更新信息失败: {error}"))?;
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    let portable = release_asset(&release.assets, true);
+    let installer = release_asset(&release.assets, false);
+    Ok(UpdateInfo {
+        current_version: current_version.clone(),
+        latest_version: latest_version.clone(),
+        has_update: compare_versions(&latest_version, &current_version).is_gt(),
+        release_name: release.name.unwrap_or_else(|| release.tag_name.clone()),
+        notes: release.body.unwrap_or_default(),
+        published_at: release.published_at.unwrap_or_default(),
+        html_url: release.html_url.unwrap_or_default(),
+        portable_url: portable
+            .map(|asset| asset.browser_download_url.clone())
+            .unwrap_or_default(),
+        portable_name: portable.map(|asset| asset.name.clone()).unwrap_or_default(),
+        installer_url: installer
+            .map(|asset| asset.browser_download_url.clone())
+            .unwrap_or_default(),
+        installer_name: installer.map(|asset| asset.name.clone()).unwrap_or_default(),
+        portable_size: portable.and_then(|asset| asset.size).unwrap_or(0),
+        installer_size: installer.and_then(|asset| asset.size).unwrap_or(0),
+    })
+}
+
+#[tauri::command]
+async fn install_update(
+    payload: InstallUpdatePayload,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !payload.download_url.starts_with("https://") {
+        return Err("更新下载地址无效".to_string());
+    }
+    let home = state.runtime_home()?;
+    let update_dir = home.join("update");
+    fs::create_dir_all(&update_dir).map_err(|error| format!("创建更新目录失败: {error}"))?;
+    let archive_path = update_dir.join(safe_download_name(&payload.download_url));
+    let response = state
+        .client
+        .get(&payload.download_url)
+        .header("User-Agent", "coco-xiaomusic")
+        .send()
+        .await
+        .map_err(|error| format!("下载更新失败: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("下载更新失败: HTTP {}", response.status()));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("读取更新包失败: {error}"))?;
+    fs::write(&archive_path, bytes).map_err(|error| format!("保存更新包失败: {error}"))?;
+
+    let exe_path = env::current_exe().map_err(|error| format!("读取程序路径失败: {error}"))?;
+    let app_dir = exe_path
+        .parent()
+        .ok_or_else(|| "程序目录无效".to_string())?
+        .to_path_buf();
+    let exe_name = exe_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "程序文件名无效".to_string())?
+        .to_string();
+    let script_path = update_dir.join("apply_update.ps1");
+    fs::write(&script_path, updater_script())
+        .map_err(|error| format!("写入更新脚本失败: {error}"))?;
+
+    let mut command = Command::new("powershell");
+    command
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-File")
+        .arg(&script_path)
+        .arg("-ProcessId")
+        .arg(std::process::id().to_string())
+        .arg("-ZipPath")
+        .arg(&archive_path)
+        .arg("-AppDir")
+        .arg(&app_dir)
+        .arg("-ExeName")
+        .arg(exe_name)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("启动更新器失败: {error}"))?;
+    state.mark_quitting();
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 async fn clear_events(state: State<'_, AppState>) -> Result<Value, String> {
     state.delete("/events").await
 }
@@ -1034,6 +1272,8 @@ pub fn run() {
             rename_device,
             save_strategy,
             test_coco_connection,
+            check_for_updates,
+            install_update,
             clear_events
         ])
         .run(tauri::generate_context!())

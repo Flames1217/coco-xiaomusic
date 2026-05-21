@@ -3,6 +3,8 @@ node_modules/
 .pnpm-store/
 .pnpm-state/
 dist/
+release/
+target/
 coco-music-app/
 src-tauri/target/
 src-tauri/gen/

@@ -104,6 +104,7 @@ class AppSettings:
     edge_tts_voice: str = "zh-CN-XiaoyiNeural"
     coco_keywords: tuple[str, ...] = DEFAULT_KEYWORDS
     device_aliases: dict[str, str] | None = None
+    last_volume: int = 50
 
     @classmethod
     def load(cls) -> "AppSettings":

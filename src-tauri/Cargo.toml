@@ -1,7 +1,7 @@
 [package]
 name = "coco-xiaomusic"
-version = "0.1.0"
-description = "Lightweight XiaoAI music controller powered by coco-downloader"
+version = "2.0.0"
+description = "轻量的小爱音箱 coco 音乐控制台"
 authors = ["Viper373"]
 edition = "2021"
 rust-version = "1.77"

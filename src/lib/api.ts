@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppStatus, EventItem, SearchItem, Song } from "./types";
+import type { AppStatus, EventItem, SearchItem, Song, UpdateInfo } from "./types";
 
 export async function getStatus(): Promise<AppStatus> {
   return invoke<AppStatus>("get_status");
@@ -88,4 +88,12 @@ export async function clearEvents() {
 
 export async function testCocoConnection(coco_base: string) {
   return invoke("test_coco_connection", { payload: { coco_base } });
+}
+
+export async function checkForUpdates(): Promise<UpdateInfo> {
+  return invoke<UpdateInfo>("check_for_updates");
+}
+
+export async function installUpdate(download_url: string) {
+  return invoke("install_update", { payload: { download_url } });
 }
