@@ -144,6 +144,7 @@ const text = {
       recentCommand: "最近口令",
       searchFeedback: "搜索状态",
       searchResults: "搜索结果",
+      providerFilter: "渠道筛选",
       playlist: "播放列表",
       recentPush: "最近推送",
       recentActivity: "最近活动",
@@ -203,6 +204,7 @@ const text = {
       noActivity: "暂无活动",
       noSearch: "暂无搜索结果",
       noLog: "暂无日志",
+      noProviderSearch: "当前渠道暂无搜索结果",
       noDevice: "暂无设备。完成小米安全验证后点击“刷新设备”。",
       unnamedDevice: "未命名设备"
     },
@@ -285,6 +287,7 @@ const text = {
       recentCommand: "Last command",
       searchFeedback: "Search status",
       searchResults: "Search results",
+      providerFilter: "Provider filter",
       playlist: "Playlist",
       recentPush: "Recent pushes",
       recentActivity: "Recent activity",
@@ -344,6 +347,7 @@ const text = {
       noActivity: "No activity",
       noSearch: "No search results",
       noLog: "No logs",
+      noProviderSearch: "No results for this provider",
       noDevice: "No devices. Finish Xiaomi verification, then click Refresh devices.",
       unnamedDevice: "Unnamed device"
     },
@@ -454,6 +458,7 @@ export default function CocoXiaoMusic() {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [providerFilter, setProviderFilter] = useState("all");
   const [searching, setSearching] = useState(false);
   const [searchFeedback, setSearchFeedback] = useState<SearchFeedback | null>(null);
   const [playlist, setPlaylist] = useState<Song[]>(loadPlaylist);
@@ -494,7 +499,19 @@ export default function CocoXiaoMusic() {
   const activeDeviceName =
     devices.find((device) => manualTargetDids.has(device.did))?.name || devices[0]?.name || t.status.noDevice;
   const targetDevice = devices.find((device) => manualTargetDids.has(device.did)) || devices[0];
-  const selectedResult = results[selectedIndex]?.item;
+  const providerCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    results.forEach((result) => {
+      const provider = result.item.provider || "coco";
+      counts.set(provider, (counts.get(provider) ?? 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [results]);
+  const filteredResults = useMemo(() => {
+    if (providerFilter === "all") return results;
+    return results.filter((result) => (result.item.provider || "coco") === providerFilter);
+  }, [providerFilter, results]);
+  const selectedResult = filteredResults[selectedIndex]?.item;
   const today = new Date().toISOString().slice(0, 10);
   const todayPushes = events.filter((event) => event.at?.startsWith(today) && Boolean(event.song)).length;
   const voiceHits = events.filter((event) => event.keyword || event.message.includes("语音") || event.message.includes("关键词")).length;
@@ -548,6 +565,10 @@ export default function CocoXiaoMusic() {
     if (playlist.length === 0) setPlaylistIndex(-1);
     else if (playlistIndex >= playlist.length) setPlaylistIndex(playlist.length - 1);
   }, [playlist, playlistIndex]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [providerFilter]);
 
   function hydrateForms(next: AppStatus, force = false) {
     const settings = next.settings ?? {};
@@ -637,6 +658,7 @@ export default function CocoXiaoMusic() {
     try {
       const items = await search(keyword);
       setResults(items);
+      setProviderFilter("all");
       setSelectedIndex(0);
       setSearchFeedback({
         tone: items.length > 0 ? "success" : "warn",
@@ -998,8 +1020,41 @@ export default function CocoXiaoMusic() {
                 )}
               </div>
 
+              {results.length > 0 && (
+                <div className="mb-4 flex flex-wrap items-center gap-2 rounded-[10px] border border-border bg-card px-3 py-2">
+                  <span className="mr-1 text-[12px] text-zinc-500">{t.label.providerFilter}</span>
+                  <button
+                    type="button"
+                    onClick={() => setProviderFilter("all")}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      providerFilter === "all"
+                        ? "bg-violet-500 text-white"
+                        : "bg-muted text-zinc-500 hover:text-foreground"
+                    )}
+                  >
+                    {t.action.all} <span className="font-mono">{results.length}</span>
+                  </button>
+                  {providerCounts.map(([provider, count]) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      onClick={() => setProviderFilter(provider)}
+                      className={cn(
+                        "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
+                        providerFilter === provider
+                          ? "bg-violet-500 text-white"
+                          : "bg-muted text-zinc-500 hover:text-foreground"
+                      )}
+                    >
+                      {provider} <span className="font-mono">{count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="overflow-hidden rounded-[10px] border border-border bg-card">
-                {results.length > 0 && (
+                {filteredResults.length > 0 && (
                   <div className="grid grid-cols-[40px_50px_minmax(180px,1.6fr)_minmax(100px,1fr)_74px_78px_128px] items-center gap-3 border-b border-border bg-muted/50 px-4 py-3 text-[11px] font-medium text-zinc-500">
                     <span className="text-right font-mono">{t.table.index}</span>
                     <span>{t.table.cover}</span>
@@ -1011,7 +1066,8 @@ export default function CocoXiaoMusic() {
                   </div>
                 )}
                 {results.length === 0 && <Empty className="p-8">{t.empty.noSearch}</Empty>}
-                {results.map((result, index) => (
+                {results.length > 0 && filteredResults.length === 0 && <Empty className="p-8">{t.empty.noProviderSearch}</Empty>}
+                {filteredResults.map((result, index) => (
                   <div
                     key={`${result.item.provider}-${result.item.id}-${index}`}
                     role="button"
