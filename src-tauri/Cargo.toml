@@ -1,0 +1,24 @@
+[package]
+name = "coco-xiaomusic"
+version = "0.1.0"
+description = "Lightweight XiaoAI music controller powered by coco-downloader"
+authors = ["Viper373"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "coco_xiaomusic_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.1.1", features = [] }
+
+[dependencies]
+portpicker = "0.1.1"
+rand = "0.8.5"
+reqwest = { version = "0.12.15", features = ["json"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tauri = { version = "2.4.0", features = [] }
+tokio = { version = "1.44.2", features = ["macros", "process", "rt-multi-thread", "time"] }
+url = "2.5.4"

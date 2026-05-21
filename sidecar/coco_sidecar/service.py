@@ -1,0 +1,1717 @@
+import asyncio
+import hashlib
+import logging
+import re
+import shutil
+import sys
+import subprocess
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
+from pathlib import Path
+from urllib.parse import quote, urlparse
+
+import xiaomusic.xiaomusic as xm_module
+from pypinyin import Style, lazy_pinyin
+from rich.console import Console
+from xiaomusic.command_handler import CommandHandler
+from xiaomusic.config import Config
+from xiaomusic.xiaomusic import XiaoMusic
+
+from .coco_client import CocoClient, CocoSong
+from .settings import AppSettings, default_hostname, repair_text
+
+
+console = Console()
+
+
+@dataclass
+class PlaybackEvent:
+    at: str
+    level: str
+    message: str
+    keyword: str = ""
+    song: dict | None = None
+
+
+@dataclass
+class RuntimeState:
+    ready: bool = False
+    starting: bool = False
+    last_keyword: str = ""
+    last_song: dict | None = None
+    last_error: str = ""
+    last_playback_at: str = ""
+    last_duration: float = 0.0
+    last_position: float = 0.0
+    last_used_url: str = ""
+    last_seek_base_url: str = ""
+    last_source_url: str = ""
+    last_volume: int = 50
+    playback_paused: bool = False
+    startup_error: str = ""
+    discovered_devices: list[dict] = field(default_factory=list)
+    events: deque[PlaybackEvent] = field(default_factory=lambda: deque(maxlen=120))
+
+
+class CocoXiaoMusicService:
+    PREVIEW_MAX_SECONDS = 75.0
+    PREVIEW_MIN_EXPECTED_SECONDS = 90.0
+    PREVIEW_RATIO = 0.68
+    PREVIEW_MARKERS = ("试听", "片段", "preview", "demo", "sample")
+
+    def __init__(self, settings: AppSettings):
+        self.settings = settings
+        self.coco = CocoClient(settings.coco_base)
+        self.state = RuntimeState()
+        self.xiaomusic: XiaoMusic | None = None
+        self._runner_task: asyncio.Task | None = None
+        self._mina_watch_task: asyncio.Task | None = None
+        self._last_mina_timestamp: dict[str, int] = {}
+        self._recent_voice_commands: dict[tuple[str, str], float] = {}
+        self._pause_verify_tasks: dict[str, asyncio.Task] = {}
+        self._stream_sources: dict[str, dict] = {}
+        self._control_version = 0
+        self._last_mina_error_log_at: dict[str, float] = {}
+        self._mina_quiet_error_count: dict[str, int] = {}
+        self._patch_online_play()
+        self._patch_command_observer()
+
+    @staticmethod
+    def _provider_priority(provider: str) -> int:
+        table = {
+            "gequhai": 1,
+            "qq": 2,
+            "qqmp3": 3,
+            "jianbin-qq": 4,
+            "jianbin-kuwo": 5,
+            "jianbin-kugou": 6,
+            "kuwo": 7,
+            "kugou": 8,
+            "migu": 9,
+            "netease": 10,
+            "livepoo": 10,
+            "fangyin": 10,
+        }
+        return table.get((provider or "").lower(), 50)
+
+    def _log(self, level: str, message: str, keyword: str = "", song: dict | None = None):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        repaired_message = repair_text(message)
+        self.state.events.appendleft(
+            PlaybackEvent(
+                at=timestamp,
+                level=level,
+                message=repaired_message,
+                keyword=repair_text(keyword),
+                song=song,
+            )
+        )
+        try:
+            log_dir = Path("logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / "backend.log").open("a", encoding="utf-8") as handle:
+                handle.write(f"{timestamp} {level.upper()} {repaired_message}\n")
+        except OSError:
+            pass
+        styles = {
+            "ok": ("bold green", "OK"),
+            "warn": ("bold yellow", "WARN"),
+            "error": ("bold red", "ERROR"),
+            "info": ("bold cyan", "INFO"),
+        }
+        style, prefix = styles.get(level, styles["info"])
+        if getattr(sys.stdout, "isatty", lambda: False)():
+            try:
+                console.print(f"[{style}]{prefix}[/{style}] {message}")
+            except UnicodeEncodeError:
+                console.print(f"[{style}]{prefix}[/{style}] {repair_text(message)}")
+
+    @staticmethod
+    def _is_noisy_mina_error(exc: Exception) -> bool:
+        text = repr(exc)
+        if "api2.mina.mi.com/remote/ubus" not in text:
+            return False
+        return any(
+            marker in text
+            for marker in (
+                '"code":999',
+                "'code': 999",
+                '"code": 999',
+                '"code":101',
+                "'code': 101",
+                '"code": 101',
+                '"message":"Unknown"',
+                "'message': 'Unknown'",
+            )
+        )
+
+    def _record_quiet_mina_error(self, did: str, exc: Exception):
+        self._mina_quiet_error_count[did] = self._mina_quiet_error_count.get(did, 0) + 1
+
+    def _is_quiet_mina_error(self, did: str, exc: Exception) -> bool:
+        if self._is_noisy_mina_error(exc):
+            return True
+        if isinstance(exc, KeyError) and str(exc).strip("'\"") == str(did):
+            return True
+        return False
+
+    def _patch_online_play(self):
+        async def coco_online_play(_, did="", arg1="", **kwargs):
+            return await self.play_keyword(did, arg1)
+
+        xm_module.OnlineMusicService.online_play = coco_online_play
+
+    def _patch_command_observer(self):
+        if getattr(CommandHandler.do_check_cmd, "_coco_observed", False):
+            return
+
+        original_do_check_cmd = CommandHandler.do_check_cmd
+
+        async def observed_do_check_cmd(handler, did="", query="", ctrl_panel=True, **kwargs):
+            cleaned = str(query or "").strip()
+            if not ctrl_panel:
+                self._log("info", f"收到语音问句：{cleaned}", keyword=cleaned)
+            if cleaned and self._is_coco_command(cleaned):
+                keyword = self._extract_coco_keyword(cleaned)
+                if not keyword:
+                    return
+                dedupe_key = (str(did or ""), cleaned)
+                now = time.monotonic()
+                if now - self._recent_voice_commands.get(dedupe_key, 0) < 6:
+                    self._log("info", f"重复语音事件已忽略：{cleaned}", keyword=cleaned)
+                    return
+                self._recent_voice_commands[dedupe_key] = now
+                self._log("info", f"关键词命中，跳过官方处理链路：{cleaned}", keyword=cleaned)
+                await self._silence_official_channel(did)
+                await self.play_keyword(did, keyword)
+                return
+            if cleaned and not ctrl_panel and self._is_active_coco_playback():
+                interrupted_at = self._mark_external_voice_interruption(cleaned)
+                version = self._control_version
+                result = await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
+                if self._looks_like_volume_command(cleaned):
+                    asyncio.create_task(self._resume_after_volume_command(did, interrupted_at, version))
+                return result
+            return await original_do_check_cmd(handler, did=did, query=query, ctrl_panel=ctrl_panel, **kwargs)
+
+        observed_do_check_cmd._coco_observed = True
+        CommandHandler.do_check_cmd = observed_do_check_cmd
+
+    @staticmethod
+    def _patch_xiaomusic_logger():
+        def setup_quiet_logger(instance):
+            instance.log = logging.getLogger("xiaomusic")
+            instance.log.handlers.clear()
+            instance.log.setLevel(logging.ERROR)
+            instance.log.addHandler(logging.NullHandler())
+
+        XiaoMusic.setup_logger = setup_quiet_logger
+
+    @staticmethod
+    def _clean_keyword(arg: str) -> str:
+        return re.sub(
+            r"^(播放歌曲|播放|放歌|放一下|放|来一首|来首|点\s*歌|点个|点首|点一首|搜歌|搜一下|搜索|听歌)\s*",
+            "",
+            arg.strip(),
+        )
+
+    def _is_coco_command(self, query: str) -> bool:
+        if self.settings.takeover_mode == "off":
+            return False
+        if self.settings.takeover_mode == "all":
+            return bool(query.strip())
+        lowered = re.sub(r"\s+", "", query.strip().lower())
+        return any(re.sub(r"\s+", "", keyword.lower()) in lowered for keyword in self.settings.coco_keywords if keyword)
+
+    def _extract_coco_keyword(self, query: str) -> str:
+        text = query.strip()
+        if self.settings.takeover_mode == "all":
+            return self._clean_keyword(text)
+        for keyword in sorted((item for item in self.settings.coco_keywords if item), key=len, reverse=True):
+            index = text.lower().find(keyword.lower())
+            if index >= 0:
+                return self._clean_keyword(text[index + len(keyword):].strip())
+        return self._clean_keyword(text)
+
+    def _is_active_coco_playback(self) -> bool:
+        if self._sync_natural_playback_end():
+            return False
+        return bool(self.state.last_playback_at and self.state.last_used_url and not self.state.playback_paused)
+
+    @staticmethod
+    def _looks_like_volume_command(query: str) -> bool:
+        text = re.sub(r"\s+", "", query or "")
+        return any(marker in text for marker in ("音量", "声音", "大声", "小声", "百分之"))
+
+    def _mark_external_voice_interruption(self, query: str) -> float:
+        position = self._current_position_seconds()
+        self.state.last_position = position
+        self.state.playback_paused = True
+        self._next_control_version()
+        self._log("warn", f"检测到非 coco 语音指令，已冻结播放器进度：{query}", keyword=query)
+        return position
+
+    async def _resume_after_volume_command(self, did: str, position: float, version: int):
+        await asyncio.sleep(1.4)
+        if version != self._control_version or not self.state.playback_paused:
+            return
+        if not self.state.last_used_url:
+            return
+        self._log("info", f"音量指令后自动续播，进度 {position:.1f}s")
+        await self.seek_playback(position, [did])
+
+    @staticmethod
+    def _split_query(keyword: str) -> tuple[str, str]:
+        if "的" not in keyword:
+            return "", keyword.strip()
+        artist, title = keyword.rsplit("的", 1)
+        return artist.strip(), title.strip()
+
+    @staticmethod
+    def _compact_text(value: str) -> str:
+        return re.sub(r"[\W_]+", "", (value or "").lower(), flags=re.UNICODE)
+
+    @classmethod
+    def _pinyin(cls, value: str, initials: bool = False) -> str:
+        style = Style.FIRST_LETTER if initials else Style.NORMAL
+        return "".join(lazy_pinyin(cls._compact_text(value), style=style, errors="ignore"))
+
+    def _search_queries(self, keyword: str) -> list[str]:
+        artist, title = self._split_query(keyword)
+        queries = [keyword]
+        if title:
+            title_py = self._pinyin(title)
+            title_initials = self._pinyin(title, initials=True)
+            queries.extend([title, title_py, title_initials])
+        if artist:
+            artist_py = self._pinyin(artist)
+            queries.extend([artist, artist_py, f"{artist} {title}", f"{title} {artist}"])
+        return list(dict.fromkeys(item.strip() for item in queries if item and item.strip()))
+
+    @staticmethod
+    def _ratio(left: str, right: str) -> float:
+        if not left or not right:
+            return 0.0
+        return SequenceMatcher(None, left, right).ratio()
+
+    def _song_match_score(self, keyword: str, song: CocoSong, index: int) -> float:
+        query_artist, query_title = self._split_query(keyword)
+        query_title = query_title or keyword
+        title = song.title or ""
+        artist = song.artist or ""
+        raw_title = self._compact_text(title)
+        raw_artist = self._compact_text(artist)
+        raw_query_title = self._compact_text(query_title)
+        raw_query_artist = self._compact_text(query_artist)
+        title_py = self._pinyin(title)
+        query_title_py = self._pinyin(query_title)
+        title_initials = self._pinyin(title, initials=True)
+        query_initials = self._pinyin(query_title, initials=True)
+        artist_py = self._pinyin(artist)
+        query_artist_py = self._pinyin(query_artist)
+
+        title_score = max(
+            self._ratio(raw_query_title, raw_title),
+            self._ratio(query_title_py, title_py),
+            self._ratio(query_initials, title_initials),
+        )
+        artist_score = max(
+            self._ratio(raw_query_artist, raw_artist),
+            self._ratio(query_artist_py, artist_py),
+        ) if query_artist else 0.0
+        contains_bonus = 0.0
+        if raw_query_title and (raw_query_title in raw_title or raw_title in raw_query_title):
+            contains_bonus += 0.18
+        if query_title_py and (query_title_py in title_py or title_py in query_title_py):
+            contains_bonus += 0.22
+        if raw_query_artist and (raw_query_artist in raw_artist or raw_artist in raw_query_artist):
+            contains_bonus += 0.22
+        order_bonus = max(0.0, 0.08 - index * 0.002)
+        cover_bonus = 0.03 if song.cover or (song.raw or {}).get("cover") else 0.0
+        provider_bonus = 0.03 if song.provider in {"qq", "qqmp3", "jianbin-qq", "jianbin-kuwo", "jianbin-kugou", "kuwo", "kugou"} else 0.0
+        score = title_score * 0.62 + artist_score * 0.28 + contains_bonus + order_bonus + cover_bonus + provider_bonus
+        if query_artist and artist_score < 0.52:
+            score -= 0.35
+        if self._has_preview_marker(song):
+            score -= 0.45
+        return score
+
+    @classmethod
+    def _has_preview_marker(cls, song: CocoSong) -> bool:
+        raw = song.raw or {}
+        text = " ".join(
+            str(value or "")
+            for value in (
+                song.title,
+                song.artist,
+                song.album,
+                raw.get("title"),
+                raw.get("artist"),
+                raw.get("album"),
+                raw.get("name"),
+                raw.get("remark"),
+            )
+        ).lower()
+        return any(marker in text for marker in cls.PREVIEW_MARKERS)
+
+    @classmethod
+    def _is_preview_duration(cls, expected_seconds: float, actual_seconds: float) -> bool:
+        if actual_seconds <= 0:
+            return False
+        if actual_seconds > cls.PREVIEW_MAX_SECONDS:
+            return False
+        if expected_seconds >= cls.PREVIEW_MIN_EXPECTED_SECONDS:
+            return actual_seconds <= expected_seconds * cls.PREVIEW_RATIO
+        return False
+
+    async def _collect_ranked_songs(self, keyword: str) -> list[tuple[float, CocoSong, str]]:
+        loop = asyncio.get_running_loop()
+        ranked: dict[tuple[str, str], tuple[float, CocoSong, str]] = {}
+        queries = self._search_queries(keyword)
+
+        async def search_query(query_index: int, query: str):
+            limit = None if query_index == 0 else 80
+            try:
+                songs = await loop.run_in_executor(None, self.coco.search_items, query, limit)
+            except Exception as exc:
+                self._log("warn", f"候选检索失败：{query} {exc!r}", keyword=keyword)
+                return query_index, query, []
+            return query_index, query, songs
+
+        batches = await asyncio.gather(
+            *(search_query(query_index, query) for query_index, query in enumerate(queries))
+        )
+        for query_index, query, songs in batches:
+            for index, song in enumerate(songs):
+                key = (song.provider, song.id)
+                if not song.id or key in ranked:
+                    continue
+                score = self._song_match_score(keyword, song, index + query_index * 4)
+                ranked[key] = (score, song, query)
+        results = sorted(ranked.values(), key=lambda item: item[0], reverse=True)
+        if len(queries) > 1:
+            self._log("info", f"相关度召回：{len(results)} 条候选，使用 {len(queries)} 个搜索词", keyword=keyword)
+        return results
+
+    def _build_xiaomusic(self) -> XiaoMusic:
+        self._patch_xiaomusic_logger()
+        user_keywords = {keyword: "online_play" for keyword in self.settings.coco_keywords}
+        user_keywords["闭嘴"] = "stop"
+        config = Config(
+            account=self.settings.account,
+            password=self.settings.password,
+            mi_did=",".join(self.settings.selected_dids),
+            hostname=self.settings.hostname,
+            port=self.settings.xiaomusic_port,
+            enable_pull_ask=True,
+            enable_force_stop=True,
+            pull_ask_sec=1,
+            edge_tts_voice=self.settings.edge_tts_voice,
+            log_file="xiaomusic.log.txt",
+            user_key_word_dict=user_keywords,
+        )
+        return XiaoMusic(config)
+
+    async def start(self):
+        if self._runner_task:
+            return
+        if "*" in self.settings.account:
+            self.state.ready = False
+            self.state.starting = False
+            self.state.startup_error = "请重新输入完整的小米账号，当前保存的是脱敏账号"
+            self._log("warn", self.state.startup_error)
+            return
+        if not self.settings.account or not self.settings.password:
+            self.state.ready = False
+            self.state.starting = False
+            self.state.startup_error = "请先配置小米账号和密码"
+            self._log("warn", self.state.startup_error)
+            return
+        self.state.starting = True
+        self._runner_task = asyncio.create_task(self._run())
+
+    async def stop(self):
+        if self._runner_task:
+            self._runner_task.cancel()
+            self._runner_task = None
+        if self._mina_watch_task:
+            self._mina_watch_task.cancel()
+            self._mina_watch_task = None
+        self.state.ready = False
+        self.state.starting = False
+        self.xiaomusic = None
+
+    async def restart(self):
+        await self.stop()
+        self.state.startup_error = ""
+        await self.start()
+
+    async def _run(self):
+        try:
+            self._cleanup_temp_audio()
+            self.xiaomusic = self._build_xiaomusic()
+            await self.xiaomusic.reinit()
+            auth_manager = getattr(self.xiaomusic, "auth_manager", None)
+            if not getattr(auth_manager, "mina_service", None):
+                raise RuntimeError("小米登录失败，请检查账号密码、验证码或账号风控状态")
+            if self._micoapi_token_empty(auth_manager):
+                raise RuntimeError(await self._xiaomi_login_hint())
+            await self._discover_devices(retries=6, raise_on_error=True)
+            self.state.ready = True
+            self.state.starting = False
+            self.state.startup_error = ""
+            self._log("ok", "xiaomusic 服务已就绪")
+            self._mina_watch_task = asyncio.create_task(self._watch_mina_latest_ask())
+            await self.xiaomusic.run_forever()
+        except Exception as exc:
+            self.state.ready = False
+            self.state.starting = False
+            self.state.startup_error = str(exc)
+            self.xiaomusic = None
+            self._log("error", f"xiaomusic 启动失败：{exc!r}")
+
+    @staticmethod
+    def _micoapi_token_empty(auth_manager) -> bool:
+        mina_service = getattr(auth_manager, "mina_service", None)
+        account = getattr(mina_service, "account", None)
+        token = getattr(account, "token", None) or {}
+        micoapi = token.get("micoapi")
+        return not isinstance(micoapi, (list, tuple)) or len(micoapi) < 2 or not micoapi[1]
+
+    async def _xiaomi_login_hint(self) -> str:
+        try:
+            from aiohttp import ClientSession
+            from miservice import MiAccount
+            from miservice.miaccount import get_random
+
+            async with ClientSession() as session:
+                probe = MiAccount(session, self.settings.account, self.settings.password, str(Path("conf/.mi.token.probe")))
+                probe.token = {"deviceId": get_random(16).upper()}
+                response = await probe._serviceLogin("serviceLogin?sid=micoapi&_json=true")
+                if response.get("code") != 0:
+                    data = {
+                        "_json": "true",
+                        "qs": response.get("qs"),
+                        "sid": response.get("sid"),
+                        "_sign": response.get("_sign"),
+                        "callback": response.get("callback"),
+                        "user": self.settings.account,
+                        "hash": hashlib.md5(self.settings.password.encode()).hexdigest().upper(),
+                    }
+                    response = await probe._serviceLogin("serviceLoginAuth2", data)
+            Path("conf/.mi.token.probe").unlink(missing_ok=True)
+            verification_url = response.get("notificationUrl")
+            if verification_url:
+                return f"小米账号需要安全验证，打开此链接完成授权后重新保存账号：{verification_url}"
+            desc = response.get("desc") or response.get("description") or "micoapi token 为空"
+            return f"小米 Mina 认证失败：{desc}"
+        except Exception as exc:
+            return f"小米 Mina 认证失败：micoapi token 为空，且验证链接获取失败 {exc!r}"
+
+    def _cleanup_temp_audio(self):
+        temp_dir = Path("music/tmp")
+        if not temp_dir.exists():
+            return
+        removed = 0
+        cutoff = time.time() - 30
+        for item in temp_dir.iterdir():
+            if not item.is_file():
+                continue
+            if item.suffix.lower() not in {".mp3", ".aac", ".m4a", ".audio"}:
+                continue
+            if item.stat().st_mtime > cutoff and not item.name.startswith("coco-"):
+                continue
+            try:
+                item.unlink()
+                removed += 1
+            except OSError:
+                continue
+        if removed:
+            self._log("info", f"已清理历史临时语音文件 {removed} 个")
+
+    async def _discover_devices(self, retries: int = 1, raise_on_error: bool = False) -> int:
+        self.state.discovered_devices = []
+        if not self.xiaomusic:
+            return 0
+        auth_manager = getattr(self.xiaomusic, "auth_manager", None)
+        mina_service = getattr(auth_manager, "mina_service", None)
+        if not mina_service:
+            self._log("warn", "小米账号还没有登录成功，无法刷新设备")
+            return 0
+        last_error = ""
+        for attempt in range(max(1, retries)):
+            try:
+                raw_devices = await mina_service.device_list()
+            except Exception as exc:
+                last_error = repr(exc)
+                if attempt >= retries - 1:
+                    self._log("warn", f"拉取原始设备列表失败：{exc!r}")
+                else:
+                    await asyncio.sleep(1)
+                continue
+            devices = []
+            for item in raw_devices or []:
+                did = str(item.get("miotDID", "") or "")
+                if not did:
+                    continue
+                devices.append(
+                    {
+                        "did": did,
+                        "device_id": str(item.get("deviceID", "") or ""),
+                        "raw_name": repair_text(str(item.get("alias") or item.get("name") or "未知设备")),
+                        "hardware": str(item.get("hardware", "") or ""),
+                    }
+                )
+            if devices:
+                self.state.discovered_devices = devices
+                self._log("ok", f"已刷新到 {len(devices)} 台小爱设备")
+                return len(devices)
+            if attempt < retries - 1:
+                await asyncio.sleep(1)
+        message = "没有从小米账号拉到小爱设备"
+        if last_error:
+            message = f"{message}：{last_error}"
+        if raise_on_error and last_error:
+            raise RuntimeError(message)
+        self._log("warn", message)
+        return 0
+
+    async def _watch_mina_latest_ask(self):
+        initialized: set[str] = set()
+        while True:
+            try:
+                if not self.xiaomusic:
+                    await asyncio.sleep(1)
+                    continue
+                auth_manager = getattr(self.xiaomusic, "auth_manager", None)
+                mina_service = getattr(auth_manager, "mina_service", None)
+                device_manager = getattr(self.xiaomusic, "device_manager", None)
+                if not mina_service or not device_manager:
+                    await asyncio.sleep(1)
+                    continue
+                for device_id, did in device_manager.device_id_did.items():
+                    try:
+                        messages = await mina_service.get_latest_ask(device_id)
+                    except Exception as exc:
+                        if self._is_noisy_mina_error(exc):
+                            self._record_quiet_mina_error(did, exc)
+                            continue
+                        self._log("warn", f"Mina 拉取失败 did={did}：{exc!r}")
+                        continue
+                    pending: list[tuple[int, str]] = []
+                    latest_ts = self._last_mina_timestamp.get(did, 0)
+                    for message in messages or []:
+                        timestamp = int(getattr(message, "timestamp_ms", 0) or 0)
+                        if timestamp <= latest_ts:
+                            continue
+                        answers = getattr(getattr(message, "response", None), "answer", []) or []
+                        if not answers:
+                            continue
+                        query = str(getattr(answers[0], "question", "") or "").strip()
+                        if query:
+                            pending.append((timestamp, query))
+                    if did not in initialized:
+                        if pending:
+                            self._last_mina_timestamp[did] = max(item[0] for item in pending)
+                        initialized.add(did)
+                        continue
+                    for timestamp, query in sorted(pending):
+                        self._last_mina_timestamp[did] = max(self._last_mina_timestamp.get(did, 0), timestamp)
+                        self._log("info", f"Mina 捕获语音：{query}", keyword=query)
+                        if self._is_coco_command(query):
+                            await self._silence_official_channel(did)
+                        await self.xiaomusic.do_check_cmd(did=did, query=query, ctrl_panel=False)
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._log("warn", f"Mina 监听循环异常：{exc!r}")
+                await asyncio.sleep(2)
+
+    async def play_keyword(self, did: str, keyword: str):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+
+        keyword = self._clean_keyword(keyword)
+        if not keyword:
+            self.state.last_error = "empty keyword"
+            self._log("error", "没有识别到歌曲关键词")
+            await self._speak_error_for_did(did, "没有识别到歌曲关键词，请换一种说法再试一次", keyword="")
+            return {"success": False, "error": "empty keyword"}
+
+        self.state.last_keyword = keyword
+        self.state.last_error = ""
+        self._log("info", f"coco 搜索：{keyword}", keyword=keyword)
+
+        search_task = asyncio.create_task(self._collect_ranked_songs(keyword))
+        device = await self._take_over_device(did)
+        if not device:
+            search_task.cancel()
+            self.state.last_error = "device not found"
+            await self._speak_error_for_did(did, "没有找到可播放的目标音箱", keyword=keyword)
+            return {"success": False, "error": "device not found"}
+
+        await self._speak_if_needed(device, self.settings.search_tts, keyword=keyword, artist="", title="")
+
+        try:
+            ranked = await search_task
+        except Exception as exc:
+            self.state.last_error = str(exc)
+            self._log("error", f"coco 请求失败：{exc!r}", keyword=keyword)
+            await self._speak_if_needed(device, self.settings.error_tts, keyword=keyword, artist="", title="")
+            return {"success": False, "error": str(exc)}
+
+        if not ranked:
+            self.state.last_error = "not found"
+            self._log("error", f"coco 没搜到：{keyword}", keyword=keyword)
+            await self._speak_if_needed(device, self.settings.error_tts, keyword=keyword, artist="", title="")
+            return {"success": False, "error": "not found"}
+
+        last_error = ""
+        for index, (score, song, matched_query) in enumerate(ranked[:80]):
+            try:
+                url = await asyncio.get_running_loop().run_in_executor(None, self.coco.resolve_url, song)
+            except Exception as exc:
+                last_error = repr(exc)
+                self._log("warn", f"候选解析失败：{song.title} - {song.artist} [{song.provider}] {exc!r}", keyword=keyword, song=song.raw)
+                continue
+            if not url:
+                last_error = "no url"
+                self._log("warn", f"候选无直链：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
+                continue
+            local_url = self._stream_url_for_speaker(url, song)
+            duration = await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url, 8)
+            preview_reason = self._preview_skip_reason(song, duration)
+            if preview_reason:
+                last_error = preview_reason
+                self._log(
+                    "warn",
+                    f"跳过疑似试听片段：{song.title} - {song.artist} [{song.provider}]，{preview_reason}",
+                    keyword=keyword,
+                    song=song.raw,
+                )
+                continue
+            if index > 0:
+                self._log("warn", f"前 {index} 条候选不可用，已切到可推送结果：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
+            if matched_query != keyword:
+                self._log("info", f"相关度命中：{song.title} - {song.artist} [{song.provider}]，搜索词={matched_query}，得分={score:.2f}", keyword=keyword, song=song.raw)
+            await self._speak_if_needed(device, self.settings.found_tts, keyword=keyword, artist=song.artist, title=song.title)
+            result = await self._play_song(did, keyword, song, url, local_url=local_url)
+            if result.get("success"):
+                return result
+            last_error = result.get("error") or str(result)
+
+        self.state.last_error = last_error or "no playable candidate"
+        await self._speak_if_needed(device, self.settings.error_tts, keyword=keyword, artist="", title="")
+        return {"success": False, "error": self.state.last_error}
+
+    async def _play_song(self, did: str, keyword: str, song: CocoSong, url: str, local_url: str | None = None):
+        self._log("ok", f"coco 第一条：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
+
+        suffix = Path(urlparse(url).path).suffix.lower() or "无后缀"
+        self._log("info", f"准备推送音源格式：{suffix}", keyword=keyword, song=song.raw)
+
+        self._next_control_version()
+        await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url)
+        results = await self._play_url_to_targets(url, [did], song, take_over=False, prepared_url=local_url)
+        target = results[0] if results else {"success": False}
+        if not target.get("success"):
+            self.state.last_error = f"target failed: {target!r}"
+            self._log("error", f"推送失败：did={did}，状态={target.get('status')!r}", keyword=keyword, song=song.raw)
+            await self._speak_error_for_did(did, "歌曲已经找到，但是音箱播放失败，请稍后再试或换一首", keyword=keyword)
+            return {"success": False, "song": song.raw, "url": url, "targets": results}
+
+        status = target.get("status", {})
+        volume = status.get("volume")
+        if isinstance(volume, int):
+            self.state.last_volume = max(0, min(100, volume))
+        self.state.last_song = song.raw
+        self.state.last_duration = self._song_duration_seconds(song.raw or {})
+        self.state.last_position = 0.0
+        self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.state.last_used_url = target.get("used_url") or local_url or url
+        self.state.last_seek_base_url = url
+        self.state.last_source_url = url
+        self.state.playback_paused = False
+        self._log("ok", f"已推送并确认音箱进入播放态（did={did}，音量={volume}）", keyword=keyword, song=song.raw)
+        return {"success": True, "song": song.raw, "url": url, "targets": results}
+
+    @staticmethod
+    def _find_ffmpeg() -> str:
+        candidates = [
+            Path("ffmpeg/bin/ffmpeg.exe"),
+            Path("ffmpeg.exe"),
+            Path("D:/Best/ffmpeg/bin/ffmpeg.exe"),
+            Path("D:/Best/ffmpeg/ffmpeg.exe"),
+        ]
+        found = shutil.which("ffmpeg")
+        if found:
+            return found
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        raise RuntimeError("ffmpeg not found")
+
+    @staticmethod
+    def _find_ffprobe() -> str:
+        candidates = [
+            Path("ffmpeg/bin/ffprobe.exe"),
+            Path("ffprobe.exe"),
+            Path("D:/Best/ffmpeg/bin/ffprobe.exe"),
+            Path("D:/Best/ffmpeg/ffprobe.exe"),
+        ]
+        found = shutil.which("ffprobe")
+        if found:
+            return found
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        ffmpeg = Path(CocoXiaoMusicService._find_ffmpeg())
+        sibling = ffmpeg.with_name("ffprobe.exe")
+        if sibling.exists():
+            return str(sibling)
+        raise RuntimeError("ffprobe not found")
+
+    @staticmethod
+    def _song_duration_seconds(raw: dict) -> float:
+        value = (
+            raw.get("duration")
+            or raw.get("interval")
+            or raw.get("time")
+            or raw.get("songTimeMinutes")
+            or raw.get("song_time")
+            or raw.get("extra", {}).get("duration")
+            or 0
+        )
+        if isinstance(value, (int, float)):
+            seconds = float(value)
+            return seconds / 1000 if seconds > 10000 else seconds
+        text = str(value).strip()
+        if not text:
+            return 0.0
+        parts = text.split(":")
+        try:
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + float(parts[1])
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+            seconds = float(text)
+            return seconds / 1000 if seconds > 10000 else seconds
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _apply_song_duration(song: CocoSong, seconds: float):
+        if seconds <= 0:
+            return
+        song.duration = seconds
+        if song.raw is not None:
+            song.raw["duration"] = seconds
+
+    def _probe_duration_seconds(self, url: str, timeout: int = 12) -> float:
+        headers = "\r\n".join(
+            [
+                "User-Agent: Mozilla/5.0",
+                "Accept: */*",
+                f"Referer: {self.settings.coco_base.rstrip('/')}/",
+                f"Origin: {self.settings.coco_base.rstrip('/')}",
+                "",
+            ]
+        )
+        command = [
+            self._find_ffprobe(),
+            "-v",
+            "error",
+            "-headers",
+            headers,
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            url,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return 0.0
+        for line in completed.stdout.splitlines():
+            try:
+                seconds = float(line.strip())
+            except ValueError:
+                continue
+            if seconds > 0:
+                return seconds
+        return 0.0
+
+    def _resolve_song_duration(self, song: CocoSong, url: str, timeout: int = 12) -> float:
+        raw = song.raw or {}
+        expected = float(raw.get("_expected_duration") or self._song_duration_seconds(raw) or 0)
+        if song.raw is not None and expected > 0:
+            song.raw["_expected_duration"] = expected
+
+        if song.raw is not None and song.raw.get("_duration_probed"):
+            return self._song_duration_seconds(song.raw)
+
+        probed = self._probe_duration_seconds(url, timeout=timeout)
+        if song.raw is not None:
+            song.raw["_duration_probed"] = True
+        duration = probed if probed > 0 else expected
+        self._apply_song_duration(song, duration)
+        return duration
+
+    def _preview_skip_reason(self, song: CocoSong, actual_seconds: float) -> str:
+        expected = float((song.raw or {}).get("_expected_duration") or 0)
+        if self._has_preview_marker(song):
+            return "标题或信息包含试听标记"
+        if self._is_preview_duration(expected, actual_seconds):
+            return f"真实音频约 {actual_seconds:.0f}s，明显短于标注 {expected:.0f}s"
+        return ""
+
+    def _current_position_seconds(self) -> float:
+        if self.state.playback_paused:
+            return max(0.0, self.state.last_position)
+        if not self.state.last_playback_at:
+            return 0.0
+        try:
+            started = datetime.strptime(self.state.last_playback_at, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return max(0.0, self.state.last_position)
+        elapsed = max(0.0, (datetime.now() - started).total_seconds())
+        if self.state.last_duration > 0:
+            elapsed = min(elapsed, self.state.last_duration)
+        return elapsed
+
+    def _sync_natural_playback_end(self, grace_seconds: float = 0.8) -> bool:
+        if self.state.playback_paused or not self.state.last_playback_at or self.state.last_duration <= 0:
+            return False
+        if self._current_position_seconds() < max(0.0, self.state.last_duration - grace_seconds):
+            return False
+        self.state.last_position = self.state.last_duration
+        return True
+
+    def _media_url_for(self, filepath: Path) -> str:
+        media_root = Path("music/tmp").resolve()
+        relative = filepath.resolve().relative_to(media_root).as_posix()
+        base = self.settings.hostname.rstrip("/")
+        return f"{base}:{self.settings.admin_port}/media/{quote(relative)}"
+
+    def _stream_url_for_speaker(self, url: str, song: CocoSong | None = None, offset: float = 0.0) -> str:
+        now = time.time()
+        for token, entry in list(self._stream_sources.items()):
+            if now - float(entry.get("created", 0)) > 3600:
+                self._stream_sources.pop(token, None)
+        key = f"{url}:{offset:.3f}:{now:.6f}"
+        token = hashlib.sha1(key.encode("utf-8")).hexdigest()[:28]
+        self._stream_sources[token] = {
+            "url": url,
+            "offset": max(0.0, float(offset or 0)),
+            "created": now,
+            "song": song.raw if song and isinstance(song.raw, dict) else {},
+        }
+        base = self.settings.hostname.rstrip("/")
+        return f"{base}:{self.settings.admin_port}/stream/{token}.mp3"
+
+    def has_stream_source(self, token: str) -> bool:
+        return token in self._stream_sources
+
+    def stream_audio_chunks(self, token: str):
+        entry = self._stream_sources.get(token)
+        if not entry:
+            raise KeyError(token)
+        url = str(entry["url"])
+        offset = max(0.0, float(entry.get("offset") or 0))
+        headers = "\r\n".join(
+            [
+                "User-Agent: Mozilla/5.0",
+                "Accept: */*",
+                f"Referer: {self.settings.coco_base.rstrip('/')}/",
+                f"Origin: {self.settings.coco_base.rstrip('/')}",
+                "",
+            ]
+        )
+        command = [
+            self._find_ffmpeg(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "5",
+            "-headers",
+            headers,
+        ]
+        if offset > 0:
+            command.extend(["-ss", f"{offset:.3f}"])
+        command.extend(
+            [
+                "-i",
+                url,
+                "-vn",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                "-ar",
+                "44100",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+        )
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        try:
+            if not process.stdout:
+                return
+            while True:
+                chunk = process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process.poll() is None:
+                process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def _make_seek_audio(self, seconds: float) -> str:
+        source_url = self.state.last_source_url or self.state.last_seek_base_url or self.state.last_used_url
+        if not source_url:
+            raise RuntimeError("current stream does not support seeking")
+        duration = max(0.0, self.state.last_duration)
+        offset = max(0.0, float(seconds))
+        if duration > 0:
+            offset = min(offset, max(0.0, duration - 1))
+        return self._stream_url_for_speaker(source_url, offset=offset)
+
+    async def _take_over_device(self, did: str):
+        if not self.xiaomusic:
+            return None
+        device = self.xiaomusic.device_manager.devices.get(did)
+        if not device:
+            self._log("warn", f"找不到设备 did={did}")
+            return None
+        await device.cancel_group_next_timer()
+        await device.group_force_stop_xiaoai()
+        return device
+
+    async def _silence_official_channel(self, did: str):
+        if not self.xiaomusic:
+            return
+        device = self.xiaomusic.device_manager.devices.get(did)
+        if not device:
+            return
+        try:
+            device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+        except Exception:
+            device_ids = [device.device_id]
+
+        async def silence_one(device_id: str):
+            mina_service = getattr(getattr(device, "auth_manager", None), "mina_service", None)
+            if not mina_service:
+                return
+            for action in (mina_service.player_pause, mina_service.player_stop):
+                try:
+                    await action(device_id)
+                except Exception as exc:
+                    if not self._is_quiet_mina_error(did, exc):
+                        self._log("warn", f"静默接管失败 did={did}：{exc!r}")
+
+        await device.cancel_group_next_timer()
+        await asyncio.gather(*(silence_one(device_id) for device_id in device_ids), return_exceptions=True)
+
+    async def _speak_if_needed(self, device, template: str, keyword: str, artist: str, title: str):
+        text = (template or "").strip()
+        if not text:
+            return
+        text = text.format(keyword=keyword, artist=artist or "未知歌手", title=title or "未知歌曲")
+        try:
+            from xiaomusic.utils.network_utils import text_to_mp3
+
+            mp3_path = await text_to_mp3(
+                text=text,
+                save_dir=self.xiaomusic.config.temp_dir,
+                voice=self.settings.edge_tts_voice,
+            )
+            tts_url = self._media_url_for(Path(mp3_path))
+            await device.group_player_play(tts_url)
+            speech_seconds = max(1.2, min(5.5, len(text) / 4.5))
+            asyncio.create_task(self._delete_temp_file_later(Path(mp3_path), delay=int(speech_seconds + 6)))
+            await asyncio.sleep(speech_seconds)
+            if self.settings.official_answer_delay_sec > 0:
+                await asyncio.sleep(self.settings.official_answer_delay_sec)
+            self._log("info", f"提示话术：{text}")
+        except Exception as exc:
+            self._log("warn", f"提示话术失败：{exc!r}")
+
+    async def _speak_error_for_did(self, did: str, text: str, keyword: str = ""):
+        if not did or not self.xiaomusic:
+            return
+        device = await self._take_over_device(did)
+        if not device:
+            return
+        template = text or self.settings.error_tts
+        await self._speak_if_needed(device, template, keyword=keyword, artist="", title="")
+
+    async def _speak_error_for_targets(self, target_dids: list[str] | None, text: str, keyword: str = ""):
+        targets = self._manual_targets(target_dids)
+        if not targets:
+            return
+        await self._speak_error_for_did(targets[0], text, keyword=keyword)
+
+    async def _delete_temp_file_later(self, filepath: Path, delay: int = 90):
+        await asyncio.sleep(delay)
+        for _ in range(6):
+            try:
+                if filepath.exists():
+                    filepath.unlink()
+                return
+            except OSError:
+                await asyncio.sleep(2)
+
+    async def search_preview(self, keyword: str):
+        songs = await asyncio.get_running_loop().run_in_executor(None, self.coco.search_items, keyword, None)
+        loop = asyncio.get_running_loop()
+        enrich_count = min(len(songs), 80)
+        enrich_tasks = [loop.run_in_executor(None, self.coco.resolve_info, song) for song in songs[:enrich_count]]
+        enrich_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+        duration_tasks = []
+        for song, result in zip(songs[: min(enrich_count, 8)], enrich_results[:8]):
+            if isinstance(result, dict) and result.get("url"):
+                duration_tasks.append(loop.run_in_executor(None, self._resolve_song_duration, song, result["url"], 6))
+        if duration_tasks:
+            await asyncio.gather(*duration_tasks, return_exceptions=True)
+        voice_default_index = next(
+            (
+                index
+                for index, song in enumerate(songs)
+                if not self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+            ),
+            0,
+        )
+        preview = []
+        for index, song in enumerate(songs):
+            has_url = None
+            if index < enrich_count:
+                result = enrich_results[index]
+                has_url = isinstance(result, dict) and bool(result.get("url"))
+            preview_reason = self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+            preview.append(
+                {
+                    "item": song.raw,
+                    "is_first": index == voice_default_index,
+                    "has_url": has_url,
+                    "preview_reason": preview_reason,
+                }
+            )
+        return {"items": preview}
+
+    def _manual_targets(self, requested: list[str] | None = None) -> list[str]:
+        candidates = requested or list(self.settings.manual_target_dids) or list(self.settings.selected_dids)
+        return [did for did in candidates if did]
+
+    async def _play_url_to_targets(
+        self,
+        url: str,
+        target_dids: list[str],
+        song: CocoSong,
+        take_over: bool = True,
+        prepared_url: str | None = None,
+    ):
+        results = []
+        local_url = prepared_url
+        if not local_url:
+            local_url = self._stream_url_for_speaker(url, song)
+
+        for did in target_dids:
+            if take_over:
+                device = await self._take_over_device(did)
+                if not device:
+                    results.append({"did": did, "success": False, "error": "device not found"})
+                    continue
+            try:
+                push_ret = await self.xiaomusic.play_url(did, local_url)
+                status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(push_ret) == 0)
+            except Exception as exc:
+                self._log("error", f"播放下发异常：did={did} {exc!r}", song=song.raw)
+                results.append({"did": did, "success": False, "error": repr(exc), "used_url": local_url})
+                continue
+            results.append(
+                {
+                    "did": did,
+                    "success": status.get("status") == 1,
+                    "status": status,
+                    "push_result": push_ret,
+                    "used_url": local_url,
+                }
+            )
+            self._log(
+                "info",
+                f"播放下发结果：did={did} code={self._extract_code(push_ret)} status={status.get('status')}",
+                song=song.raw,
+            )
+        return results
+
+    async def _resolve_selected_url_with_fallback(self, song: CocoSong) -> tuple[CocoSong, str | None, str]:
+        loop = asyncio.get_running_loop()
+        first_error = "no url"
+        try:
+            url = await loop.run_in_executor(None, self.coco.resolve_url, song)
+            if url:
+                duration = await loop.run_in_executor(None, self._resolve_song_duration, song, url, 8)
+                preview_reason = self._preview_skip_reason(song, duration)
+                if not preview_reason:
+                    return song, url, ""
+                first_error = preview_reason
+                self._log("warn", f"指定歌曲疑似试听片段，尝试同曲兜底：{song.title} - {song.artist} [{song.provider}]，{preview_reason}", song=song.raw)
+        except Exception as exc:
+            first_error = repr(exc)
+
+        title_key = self._compact_text(song.title)
+        artist_key = self._compact_text(song.artist)
+        query = f"{song.artist}的{song.title}" if song.artist else song.title
+        ranked = await self._collect_ranked_songs(query)
+        for _, candidate, _ in ranked[:80]:
+            if candidate.provider == song.provider and candidate.id == song.id:
+                continue
+            candidate_title = self._compact_text(candidate.title)
+            candidate_artist = self._compact_text(candidate.artist)
+            if title_key and title_key not in candidate_title and candidate_title not in title_key:
+                continue
+            if artist_key and candidate_artist and artist_key not in candidate_artist and candidate_artist not in artist_key:
+                continue
+            try:
+                url = await loop.run_in_executor(None, self.coco.resolve_url, candidate)
+            except Exception as exc:
+                self._log("warn", f"同曲兜底解析失败：{candidate.title} - {candidate.artist} [{candidate.provider}] {exc!r}", song=candidate.raw)
+                continue
+            if url:
+                duration = await loop.run_in_executor(None, self._resolve_song_duration, candidate, url, 8)
+                preview_reason = self._preview_skip_reason(candidate, duration)
+                if preview_reason:
+                    self._log("warn", f"同曲兜底跳过试听片段：{candidate.title} - {candidate.artist} [{candidate.provider}]，{preview_reason}", song=candidate.raw)
+                    continue
+                self._log(
+                    "warn",
+                    f"指定渠道不可用，已切到同曲渠道：{candidate.title} - {candidate.artist} [{candidate.provider}]",
+                    song=candidate.raw,
+                )
+                return candidate, url, first_error
+        return song, None, first_error
+
+    async def _poll_player_status(self, did: str, max_tries: int = 3, assume_playing: bool = False):
+        status = {}
+        for index in range(max_tries):
+            try:
+                status = await self.xiaomusic.get_player_status(did=did)
+            except Exception as exc:
+                return self._fallback_player_status(did, exc, assume_playing=assume_playing)
+            if status.get("status") == 1:
+                return status
+            if index + 1 < max_tries:
+                await asyncio.sleep(1.0)
+        return status
+
+    def _fallback_player_status(self, did: str, exc: Exception | None = None, assume_playing: bool = False) -> dict:
+        if exc is not None:
+            if self._is_quiet_mina_error(did, exc):
+                self._record_quiet_mina_error(did, exc)
+            else:
+                now = time.monotonic()
+                last = self._last_mina_error_log_at.get(did, 0)
+                if now - last > 30:
+                    self._last_mina_error_log_at[did] = now
+                    self._log("warn", f"Mina 拉取失败 did={did}，播放器使用本地状态兜底：{exc!r}")
+        ended = self._sync_natural_playback_end()
+        return {
+            "status": 0 if ended else (2 if self.state.playback_paused else (1 if (assume_playing or self.state.last_used_url) else 0)),
+            "volume": None,
+            "loop_type": 1,
+            "local_fallback": True,
+            "local_playback_paused": self.state.playback_paused,
+            "local_position": self._current_position_seconds(),
+            "local_duration": self.state.last_duration,
+        }
+
+    def _cancel_pause_verify(self, did: str):
+        task = self._pause_verify_tasks.pop(did, None)
+        if task and not task.done():
+            task.cancel()
+
+    def _next_control_version(self) -> int:
+        self._control_version += 1
+        return self._control_version
+
+    async def _verify_pause_or_stop(self, did: str, paused_at: float, version: int, delay: float = 0.8):
+        try:
+            await asyncio.sleep(delay)
+            if version != self._control_version or not self.state.playback_paused:
+                return
+            device = self.xiaomusic.device_manager.devices.get(did) if self.xiaomusic else None
+            if not device:
+                return
+            status = await self._poll_player_status(did, max_tries=1)
+            if status.get("status") != 1 or version != self._control_version or not self.state.playback_paused:
+                return
+            device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+            for device_id in device_ids:
+                await device.auth_manager.mina_service.player_stop(device_id)
+            if version == self._control_version and self.state.playback_paused:
+                self.state.last_position = paused_at
+                self._log("info", "设备未响应 pause，已后台静默 stop 并保留进度")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("warn", f"后台暂停确认失败：{exc!r}")
+
+    async def _verify_resume_or_replay(self, did: str, version: int, resumed_from: float, delay: float = 0.7):
+        try:
+            await asyncio.sleep(delay)
+            if version != self._control_version or self.state.playback_paused:
+                return
+            status = await self._poll_player_status(did, max_tries=1)
+            if status.get("status") == 1 or version != self._control_version or self.state.playback_paused:
+                return
+            replay_url = self._make_seek_audio(resumed_from) if resumed_from > 1 else self.state.last_used_url
+            await self.xiaomusic.play_url(did, replay_url)
+            if version == self._control_version and not self.state.playback_paused:
+                self.state.last_used_url = replay_url
+                self._log("info", "设备未响应 play，已后台从保留进度重推")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("warn", f"后台续播确认失败：{exc!r}")
+
+    @staticmethod
+    def _extract_code(push_ret):
+        if isinstance(push_ret, dict):
+            data = push_ret.get("data")
+            if isinstance(data, dict) and "code" in data:
+                return data["code"]
+            if "code" in push_ret:
+                return push_ret["code"]
+        if isinstance(push_ret, list) and push_ret:
+            return CocoXiaoMusicService._extract_code(push_ret[0])
+        return "?"
+
+    async def play_selected_song(
+        self,
+        song_id: str,
+        provider: str,
+        title: str,
+        artist: str,
+        cover: str = "",
+        duration: str = "",
+        album: str = "",
+        audio_type: str = "",
+        bitrate: str = "",
+        target_dids: list[str] | None = None,
+    ):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        target_dids = self._manual_targets(target_dids)
+        if not target_dids:
+            return {"success": False, "error": "device not selected"}
+
+        song = CocoSong(
+            id=song_id,
+            provider=provider,
+            title=title,
+            artist=artist,
+            album=album,
+            cover=cover,
+            duration=duration,
+            audio_type=audio_type,
+            bitrate=bitrate,
+            raw={
+                "id": song_id,
+                "provider": provider,
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "cover": cover,
+                "duration": duration,
+                "audio_type": audio_type,
+                "bitrate": bitrate,
+            },
+        )
+        song, url, first_error = await self._resolve_selected_url_with_fallback(song)
+        if not url:
+            self.state.last_error = first_error or "selected song has no url"
+            self._log("error", f"指定歌曲解析失败，且同曲兜底不可用：{title} - {artist} [{provider}]", song=song.raw)
+            await self._speak_error_for_targets(target_dids, "这首歌的音源解析失败，已经没有可用的同曲渠道", keyword=title)
+            return {"success": False, "error": self.state.last_error}
+
+        self._next_control_version()
+        await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url)
+        results = await self._play_url_to_targets(url, target_dids, song)
+        if not any(item["success"] for item in results):
+            await self._speak_error_for_targets(target_dids, "歌曲已经找到，但是音箱播放失败，请稍后再试或换一首", keyword=title)
+            return {"success": False, "error": "all target devices failed", "targets": results}
+        self.state.last_song = song.raw
+        self.state.last_duration = self._song_duration_seconds(song.raw or {})
+        self.state.last_position = 0.0
+        self.state.last_playback_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        first_success = next((item for item in results if item.get("success")), {})
+        self.state.last_used_url = first_success.get("used_url", "")
+        self.state.last_seek_base_url = url
+        self.state.last_source_url = url
+        self.state.playback_paused = False
+        self._log("ok", f"前端手动推送：{title} - {artist} [{provider}]", song=song.raw)
+        return {"success": True, "song": song.raw, "url": url, "targets": results}
+
+    async def stop_playback(self, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        targets = self._manual_targets(target_dids)
+        self._next_control_version()
+        results = []
+        for did in targets:
+            device = await self._take_over_device(did)
+            results.append({"did": did, "success": bool(device)})
+        if any(item["success"] for item in results):
+            self.state.last_position = self._current_position_seconds()
+            self.state.playback_paused = True
+            self._log("ok", "已停止当前推流")
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def pause_playback(self, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        targets = self._manual_targets(target_dids)
+        results = []
+        paused_at = self._current_position_seconds()
+        version = self._next_control_version()
+        for did in targets:
+            self._cancel_pause_verify(did)
+            device = self.xiaomusic.device_manager.devices.get(did)
+            if not device:
+                results.append({"did": did, "success": False, "error": "device not found"})
+                continue
+            try:
+                device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+                ret = []
+                for device_id in device_ids:
+                    ret.append(await device.auth_manager.mina_service.player_pause(device_id))
+                results.append({"did": did, "success": True, "ret": ret})
+            except Exception as exc:
+                results.append({"did": did, "success": False, "error": repr(exc)})
+        if any(item["success"] for item in results):
+            self.state.last_position = paused_at
+            self.state.playback_paused = True
+            for item in results:
+                if item.get("success") and item.get("did"):
+                    self._pause_verify_tasks[item["did"]] = asyncio.create_task(self._verify_pause_or_stop(item["did"], paused_at, version))
+            self._log("ok", "已暂停当前推流")
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def resume_playback(self, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        if not self.state.last_used_url:
+            await self._speak_error_for_targets(target_dids, "没有可以继续播放的上一首歌曲")
+            return {"success": False, "error": "no previous stream url"}
+        if self._sync_natural_playback_end() or (
+            self.state.last_duration > 0 and self.state.last_position >= self.state.last_duration - 0.8
+        ):
+            self.state.last_position = 0.0
+            self.state.playback_paused = True
+            self._log("info", "上一首已播完，正在从头重新播放")
+            return await self.seek_playback(0.0, target_dids)
+        targets = self._manual_targets(target_dids)
+        results = []
+        resumed_from = max(0.0, self.state.last_position)
+        version = self._next_control_version()
+        for did in targets:
+            self._cancel_pause_verify(did)
+            device = self.xiaomusic.device_manager.devices.get(did)
+            if not device:
+                results.append({"did": did, "success": False, "error": "device not found"})
+                continue
+            try:
+                device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+                ret = []
+                for device_id in device_ids:
+                    ret.append(await device.auth_manager.mina_service.player_play(device_id))
+                asyncio.create_task(self._verify_resume_or_replay(did, version, resumed_from))
+                results.append({"did": did, "success": True, "ret": ret})
+            except Exception as exc:
+                results.append({"did": did, "success": False, "error": repr(exc)})
+        if any(item["success"] for item in results):
+            self.state.playback_paused = False
+            self.state.last_playback_at = (datetime.now() - timedelta(seconds=resumed_from)).strftime("%Y-%m-%d %H:%M:%S")
+            self._log("ok", "已继续播放上一次推流")
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def seek_playback(self, position: float, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        targets = self._manual_targets(target_dids)
+        try:
+            seek_url = await asyncio.get_running_loop().run_in_executor(None, self._make_seek_audio, position)
+        except Exception as exc:
+            self.state.last_error = repr(exc)
+            self._log("error", f"进度跳转失败：{exc!r}")
+            await self._speak_error_for_targets(target_dids, "进度跳转失败，请稍后再试")
+            return {"success": False, "error": repr(exc)}
+        results = []
+        for did in targets:
+            try:
+                ret = await self.xiaomusic.play_url(did, seek_url)
+                status = await self._poll_player_status(did, max_tries=3, assume_playing=self._extract_code(ret) == 0)
+                results.append({"did": did, "success": status.get("status") == 1, "ret": ret, "status": status})
+            except Exception as exc:
+                results.append({"did": did, "success": False, "error": repr(exc)})
+        if any(item["success"] for item in results):
+            self.state.last_position = max(0.0, float(position))
+            self.state.last_playback_at = (datetime.now() - timedelta(seconds=self.state.last_position)).strftime("%Y-%m-%d %H:%M:%S")
+            self.state.last_used_url = seek_url
+            self.state.playback_paused = False
+            self._log("ok", f"已跳转到 {self.state.last_position:.1f}s 继续播放")
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def set_volume(self, volume: int, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready"}
+        volume = max(0, min(100, int(volume)))
+        self.state.last_volume = volume
+        targets = self._manual_targets(target_dids)
+        results = []
+        for did in targets:
+            device = self.xiaomusic.device_manager.devices.get(did)
+            if not device:
+                results.append({"did": did, "success": False, "error": "device not found"})
+                continue
+            try:
+                device_ids = self.xiaomusic.device_manager.get_group_device_id_list(device.group_name)
+                ret = []
+                for device_id in device_ids:
+                    ret.append(await device.auth_manager.mina_service.player_set_volume(device_id, volume))
+                results.append({"did": did, "success": True, "ret": ret, "volume": volume})
+            except Exception as exc:
+                results.append({"did": did, "success": False, "error": repr(exc)})
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def player_status(self, target_dids: list[str] | None = None):
+        if not self.xiaomusic:
+            return {"success": False, "error": "xiaomusic not ready", "targets": []}
+        targets = self._manual_targets(target_dids)
+        results = []
+        for did in targets:
+            try:
+                status = await self.xiaomusic.get_player_status(did=did)
+                if self._sync_natural_playback_end():
+                    status = dict(status)
+                    status["status"] = 0
+                elif status.get("status") == 0 and self.state.last_playback_at and not self.state.playback_paused:
+                    status = dict(status)
+                    self.state.last_position = self._current_position_seconds()
+                    self.state.playback_paused = True
+                    self._log("warn", "音箱已停止播放，已冻结播放器进度")
+                status = dict(status)
+                status["local_playback_paused"] = self.state.playback_paused
+                status["local_position"] = self._current_position_seconds()
+                status["local_duration"] = self.state.last_duration
+                results.append({"did": did, "success": True, "status": status})
+            except Exception as exc:
+                item = {
+                    "did": did,
+                    "success": True,
+                    "status": self._fallback_player_status(did, exc),
+                }
+                if not self._is_quiet_mina_error(did, exc):
+                    item["warning"] = repr(exc)
+                results.append(item)
+        return {"success": any(item["success"] for item in results), "targets": results}
+
+    async def update_account(self, account: str, password: str, hostname: str):
+        account = account.strip()
+        if "*" in account:
+            return {"success": False, "error": "请输入完整的小米账号，不能保存脱敏账号"}
+        if not account and not self.settings.account:
+            return {"success": False, "error": "请输入小米账号"}
+        if not password and not self.settings.password:
+            return {"success": False, "error": "请输入小米账号密码"}
+        old_identity = (self.settings.account, self.settings.password, self.settings.hostname)
+        self.settings.account = account or self.settings.account
+        if password:
+            self.settings.password = password
+        self.settings.hostname = default_hostname()
+        new_identity = (self.settings.account, self.settings.password, self.settings.hostname)
+        if new_identity != old_identity:
+            self.settings.selected_dids = ()
+            self.settings.manual_target_dids = ()
+        self.settings.save()
+        await self.restart()
+        return {"success": True}
+
+    async def refresh_devices(self):
+        if not self.xiaomusic or not self.state.ready or self.state.startup_error:
+            await self.restart()
+            for _ in range(40):
+                if self.state.ready or self.state.startup_error:
+                    break
+                await asyncio.sleep(0.5)
+        if self.state.startup_error:
+            return {"success": False, "error": self.state.startup_error}
+        try:
+            count = await self._discover_devices(retries=4, raise_on_error=True)
+        except Exception as exc:
+            self._log("error", f"刷新设备失败：{exc!r}")
+            return {"success": False, "error": str(exc)}
+        return {"success": count > 0, "count": count, "error": "" if count else "没有从小米账号拉到小爱设备"}
+
+    async def select_devices(self, dids: list[str], manual_targets: list[str] | None = None):
+        cleaned_dids = tuple(dict.fromkeys(did.strip() for did in dids if did.strip()))
+        if not cleaned_dids:
+            return {"success": False, "error": "empty dids"}
+        cleaned_manual = tuple(did for did in dict.fromkeys((manual_targets or dids)) if did in cleaned_dids)
+        self.settings.selected_dids = cleaned_dids
+        self.settings.manual_target_dids = cleaned_manual or cleaned_dids[:1]
+        self.settings.save()
+        await self.restart()
+        return {
+            "success": True,
+            "selected_dids": list(self.settings.selected_dids),
+            "manual_target_dids": list(self.settings.manual_target_dids),
+        }
+
+    async def update_runtime_settings(
+        self,
+        coco_base: str,
+        admin_port: int,
+        takeover_mode: str,
+        official_answer_delay_sec: float,
+        search_tts: str,
+        found_tts: str,
+        error_tts: str,
+        coco_keywords: list[str] | None = None,
+    ):
+        self.settings.coco_base = coco_base.strip() or self.settings.coco_base
+        if 1024 <= int(admin_port or self.settings.admin_port) <= 65535:
+            self.settings.admin_port = int(admin_port)
+        if takeover_mode in {"keyword", "all", "off"}:
+            self.settings.takeover_mode = takeover_mode
+        self.settings.official_answer_delay_sec = max(0.0, official_answer_delay_sec)
+        self.settings.search_tts = search_tts.strip()
+        self.settings.found_tts = found_tts.strip()
+        self.settings.error_tts = error_tts.strip()
+        if coco_keywords is not None:
+            cleaned = [repair_text(item.strip()) for item in coco_keywords if item and item.strip()]
+            self.settings.coco_keywords = tuple(dict.fromkeys(cleaned))
+        self.settings.save()
+        self.coco = CocoClient(self.settings.coco_base)
+        return {"success": True}
+
+    async def test_coco_connection(self, coco_base: str):
+        base = coco_base.strip() or self.settings.coco_base
+        client = CocoClient(base)
+        try:
+            songs = await asyncio.get_running_loop().run_in_executor(None, client.search_items, "test", 1)
+        except Exception as exc:
+            return {"success": False, "error": repr(exc)}
+        return {"success": True, "items": len(songs), "coco_base": base}
+
+    async def rename_device(self, did: str, alias: str):
+        did = did.strip()
+        alias = alias.strip()
+        if not did:
+            return {"success": False, "error": "empty did"}
+        if alias:
+            self.settings.device_aliases[did] = alias
+        else:
+            self.settings.device_aliases.pop(did, None)
+        self.settings.save()
+        return {"success": True, "did": did, "alias": alias}
+
+    def status(self) -> dict:
+        token_file = Path("conf/.mi.token")
+        devices = []
+        if self.xiaomusic:
+            for device in self.xiaomusic.device_manager.devices.values():
+                raw_device = getattr(device, "device", None)
+                did = getattr(device, "did", "") or getattr(raw_device, "did", "")
+                raw_name = repair_text(getattr(raw_device, "name", "") or getattr(device, "group_name", ""))
+                devices.append(
+                    {
+                        "did": did,
+                        "device_id": getattr(device, "device_id", "") or getattr(raw_device, "device_id", ""),
+                        "name": repair_text(self.settings.device_aliases.get(did) or raw_name),
+                        "raw_name": raw_name,
+                        "alias": repair_text(self.settings.device_aliases.get(did, "")),
+                        "hardware": getattr(device, "hardware", "") or getattr(raw_device, "hardware", ""),
+                    }
+                )
+        if not devices:
+            for item in self.state.discovered_devices:
+                did = item["did"]
+                devices.append(
+                    {
+                        "did": did,
+                        "device_id": item["device_id"],
+                        "name": repair_text(self.settings.device_aliases.get(did) or item["raw_name"]),
+                        "raw_name": repair_text(item["raw_name"]),
+                        "alias": repair_text(self.settings.device_aliases.get(did, "")),
+                        "hardware": item["hardware"],
+                    }
+                )
+        selected_device_present = bool(self.settings.selected_dids) and all(
+            did in {device["did"] for device in devices} for did in self.settings.selected_dids
+        )
+        return {
+            "ready": self.state.ready,
+            "starting": self.state.starting,
+            "startup_error": self.state.startup_error,
+            "last_keyword": self.state.last_keyword,
+            "last_song": self.state.last_song,
+            "last_error": self.state.last_error,
+            "last_playback_at": self.state.last_playback_at,
+            "last_duration": self.state.last_duration,
+            "last_position": self._current_position_seconds(),
+            "last_used_url": self.state.last_used_url,
+            "last_seek_base_url": self.state.last_seek_base_url,
+            "last_source_url": self.state.last_source_url,
+            "last_volume": self.state.last_volume,
+            "playback_paused": self.state.playback_paused,
+            "selected_dids": list(self.settings.selected_dids),
+            "manual_target_dids": list(self.settings.manual_target_dids),
+            "coco_base": self.settings.coco_base,
+            "token_present": token_file.exists(),
+            "account_configured": bool(self.settings.account and self.settings.password),
+            "selected_device_present": selected_device_present,
+            "devices": devices,
+        }
+
+    def events(self) -> list[dict]:
+        return [
+            {
+                "at": item.at,
+                "level": item.level,
+                "message": repair_text(item.message),
+                "keyword": item.keyword,
+                "song": item.song,
+            }
+            for item in self.state.events
+        ]
+
+    def clear_events(self) -> dict:
+        self.state.events.clear()
+        return {"success": True}

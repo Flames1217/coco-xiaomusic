@@ -1,0 +1,16 @@
+[env]
+RC = { value = 'D:\Best\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe', force = true }
+CC = { value = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe', force = true }
+CXX = { value = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\cl.exe', force = true }
+AR = { value = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\lib.exe', force = true }
+WindowsSdkDir = { value = 'D:\Best\Windows Kits\10\', force = true }
+WindowsSDKVersion = { value = '10.0.26100.0\', force = true }
+INCLUDE = { value = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\include;D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\ATLMFC\include;D:\Best\Microsoft Visual Studio\Products\VC\Auxiliary\VS\include;D:\Best\Windows Kits\10\Include\10.0.26100.0\ucrt;D:\Best\Windows Kits\10\Include\10.0.26100.0\shared;D:\Best\Windows Kits\10\Include\10.0.26100.0\um;D:\Best\Windows Kits\10\Include\10.0.26100.0\winrt;D:\Best\Windows Kits\10\Include\10.0.26100.0\cppwinrt', force = true }
+LIB = { value = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\lib\x64;D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\ATLMFC\lib\x64;D:\Best\Microsoft Visual Studio\Products\VC\Auxiliary\VS\lib\x64;D:\Best\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;D:\Best\Windows Kits\10\Lib\10.0.26100.0\um\x64', force = true }
+
+[target.x86_64-pc-windows-msvc]
+linker = 'D:\Best\Microsoft Visual Studio\Products\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\link.exe'
+rustflags = [
+  "-Lnative=D:\\Best\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64",
+  "-Lnative=D:\\Best\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64"
+]
