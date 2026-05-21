@@ -60,6 +60,7 @@ export interface AppStatus {
   starting?: boolean;
   sidecar_ready?: boolean;
   startup_error?: string;
+  service_started_at?: string;
   last_keyword?: string;
   last_song?: Song | null;
   last_error?: string;

@@ -41,6 +41,7 @@ class PlaybackEvent:
 class RuntimeState:
     ready: bool = False
     starting: bool = False
+    service_started_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     last_keyword: str = ""
     last_song: dict | None = None
     last_error: str = ""
@@ -1724,6 +1725,7 @@ class CocoXiaoMusicService:
             "ready": self.state.ready,
             "starting": self.state.starting,
             "startup_error": self.state.startup_error,
+            "service_started_at": self.state.service_started_at,
             "last_keyword": self.state.last_keyword,
             "last_song": self.state.last_song,
             "last_error": self.state.last_error,

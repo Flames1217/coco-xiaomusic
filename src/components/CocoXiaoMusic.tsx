@@ -457,6 +457,36 @@ function formatTime(value: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalTimestamp(value: string | undefined): Date | null {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatUptime(startedAt: string | undefined): string {
+  const started = parseLocalTimestamp(startedAt);
+  if (!started) return "--";
+  const total = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (days > 0) return `${days}天 ${hours}小时`;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  if (minutes > 0) return `${minutes}分钟 ${seconds}秒`;
+  return `${seconds}秒`;
+}
+
 function durationText(value: unknown): string {
   if (typeof value === "number") return formatTime(value > 10000 ? value / 1000 : value);
   const text = String(value ?? "").trim();
@@ -609,11 +639,10 @@ export default function CocoXiaoMusic() {
   const playlistKeys = useMemo(() => new Set(playlist.map((song) => songKey(song))), [playlist]);
   const selectedResultInPlaylist = selectedResult ? playlistKeys.has(songKey(selectedResult)) : false;
   const activeSearchProviders = useMemo(() => [...selectedProviders], [selectedProviders]);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey();
   const todayPushes = events.filter((event) => event.at?.startsWith(today) && Boolean(event.song)).length;
   const voiceHits = events.filter((event) => event.keyword || event.message.includes("语音") || event.message.includes("关键词")).length;
-  const firstEventTime = events.at(-1)?.at;
-  const serviceUptime = firstEventTime ? t.status.running : "--";
+  const serviceUptime = formatUptime(status.service_started_at);
 
   const filteredLogs = useMemo(() => {
     return events.filter((event) => logFilter === "all" || levelLabel(event.level).toLowerCase() === logFilter);
@@ -764,6 +793,24 @@ export default function CocoXiaoMusic() {
     } catch (error) {
       setUpdating(false);
       setToast(String(error));
+    }
+  }
+
+  async function manualCheckUpdate() {
+    setBusy(true);
+    try {
+      const info = await checkForUpdates();
+      setUpdateInfo(info);
+      setUpdateRead(false);
+      if (info.has_update) {
+        setUpdateDialogOpen(true);
+      } else {
+        showDialog("已是最新版本", `当前版本：${info.current_version}\n最新版本：${info.latest_version || info.current_version}`, "success");
+      }
+    } catch (error) {
+      showDialog("检查更新失败", String(error), "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1049,6 +1096,10 @@ export default function CocoXiaoMusic() {
             {busy && <Loader2 className="h-4 w-4 animate-spin text-violet-500" />}
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={manualCheckUpdate} disabled={busy}>
+              <Download className="h-3.5 w-3.5" />
+              检查更新
+            </Button>
             <Button variant="secondary" size="sm" onClick={() => refresh(true)}>
               <RefreshCw className="h-3.5 w-3.5" />
               {t.action.refresh}
@@ -1091,13 +1142,22 @@ export default function CocoXiaoMusic() {
                   <CardContent className="px-4 pb-4">
                     <div className="grid grid-cols-2 gap-3">
                       {recentSongs.map((song, index) => (
-                        <div key={`${song.title}-${index}`} className="group flex min-w-0 items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:border-violet-500/30">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
-                            <Music2 className="h-4 w-4 text-violet-500" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-medium">{song.title}</p>
-                            <p className="truncate text-[12px] text-zinc-500">{song.artist || "--"}</p>
+                        <div key={`${song.provider}-${song.id}-${song.title}-${index}`} className="group flex min-w-0 items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:border-violet-500/30">
+                          <CoverArt song={song} className="h-16 w-16" />
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-semibold">{song.title || "--"}</p>
+                                <p className="truncate text-[12px] text-zinc-500">{song.artist || "--"}</p>
+                              </div>
+                              <Badge variant="secondary" className="shrink-0">{durationText(song.duration)}</Badge>
+                            </div>
+                            <p className="truncate text-[11px] text-zinc-500">专辑：{song.album || "--"}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              <Badge variant="outline">{providerLabel(song.provider)}</Badge>
+                              {(song.quality || song.bitrate) && <Badge variant="outline">{song.quality || song.bitrate}</Badge>}
+                              {song.audio_type && <Badge variant="outline">{song.audio_type}</Badge>}
+                            </div>
                           </div>
                         </div>
                       ))}
