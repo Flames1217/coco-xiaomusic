@@ -9,34 +9,34 @@
 </p>
 
 <p align="center">
-  <img src="./assets/readme/tech/windows11.svg" width="28" height="28" alt="Windows" />
+  <img src="./assets/readme/tech/windows11.svg" width="18" height="18" align="absmiddle" alt="Windows" />
   <b>Windows 10/11</b>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <img src="./assets/readme/tech/tauri.svg" width="28" height="28" alt="Tauri" />
+  <img src="./assets/readme/tech/tauri.svg" width="18" height="18" align="absmiddle" alt="Tauri" />
   <b>Tauri 2</b>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <img src="./assets/readme/tech/react.svg" width="28" height="28" alt="React" />
+  <img src="./assets/readme/tech/react.svg" width="18" height="18" align="absmiddle" alt="React" />
   <b>React</b>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <img src="./assets/readme/tech/fastapi.svg" width="28" height="28" alt="FastAPI" />
+  <img src="./assets/readme/tech/fastapi.svg" width="18" height="18" align="absmiddle" alt="FastAPI" />
   <b>FastAPI</b>
 </p>
 
-## <img src="./assets/readme/sparkles.svg" width="24" height="24" alt="" /> 鸣谢与灵感来源
+## <img src="./assets/readme/sparkles.svg" width="22" height="22" align="absmiddle" alt="" /> 鸣谢与灵感来源
 
 <p>
-  <img src="https://github.com/markcxx.png?size=48" width="24" height="24" alt="markcxx" />
+  <img src="./assets/readme/projects/coco-cherry-logo.svg" width="18" height="18" align="absmiddle" alt="COCO Downloader" />
   <b>coco 音乐下载站 / COCO Downloader</b>：本项目默认对接用户自建的 coco 音乐服务。项目地址：
   <a href="https://github.com/markcxx/coco-downloader">markcxx/coco-downloader</a>
 </p>
 
 <p>
-  <img src="https://github.com/hanxi.png?size=48" width="24" height="24" alt="hanxi" />
+  <img src="https://github.com/hanxi.png?size=36" width="18" height="18" align="absmiddle" alt="hanxi/xiaomusic" />
   <b>XiaoMusic</b>：本项目的小爱音箱登录、设备控制和播放链路参考并集成 XiaoMusic 能力。项目地址：
   <a href="https://github.com/hanxi/xiaomusic">hanxi/xiaomusic</a>
 </p>
 
-> <img src="./assets/readme/alert-triangle.svg" width="18" height="18" alt="" /> coco 服务需要用户自行搭建并在应用内填写服务地址。本仓库不包含、不托管、不分发 coco 服务端或任何敏感音源服务代码。
+> <img src="./assets/readme/alert-triangle.svg" width="16" height="16" align="absmiddle" alt="" /> coco 服务需要用户自行搭建并在应用内填写服务地址。本仓库不包含、不托管、不分发 coco 服务端或任何敏感音源服务代码。
 
 ## ✨ 主要能力
 
