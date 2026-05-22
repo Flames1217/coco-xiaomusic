@@ -9,22 +9,29 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Windows_10%2F11-0078D4?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows 10/11" />
-  <img src="https://img.shields.io/badge/Tauri_2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" />
-  <img src="https://img.shields.io/badge/React-149ECA?style=for-the-badge&logo=react&logoColor=white" alt="React" />
-  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="./assets/readme/tech/windows11.svg" width="28" height="28" alt="Windows" />
+  <b>Windows 10/11</b>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <img src="./assets/readme/tech/tauri.svg" width="28" height="28" alt="Tauri" />
+  <b>Tauri 2</b>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <img src="./assets/readme/tech/react.svg" width="28" height="28" alt="React" />
+  <b>React</b>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <img src="./assets/readme/tech/fastapi.svg" width="28" height="28" alt="FastAPI" />
+  <b>FastAPI</b>
 </p>
 
 ## <img src="./assets/readme/sparkles.svg" width="24" height="24" alt="" /> 鸣谢与灵感来源
 
 <p>
-  <img src="./assets/readme/music.svg" width="20" height="20" alt="" />
+  <img src="https://github.com/markcxx.png?size=48" width="24" height="24" alt="markcxx" />
   <b>coco 音乐下载站 / COCO Downloader</b>：本项目默认对接用户自建的 coco 音乐服务。项目地址：
   <a href="https://github.com/markcxx/coco-downloader">markcxx/coco-downloader</a>
 </p>
 
 <p>
-  <img src="./assets/readme/speaker.svg" width="20" height="20" alt="" />
+  <img src="https://github.com/hanxi.png?size=48" width="24" height="24" alt="hanxi" />
   <b>XiaoMusic</b>：本项目的小爱音箱登录、设备控制和播放链路参考并集成 XiaoMusic 能力。项目地址：
   <a href="https://github.com/hanxi/xiaomusic">hanxi/xiaomusic</a>
 </p>
