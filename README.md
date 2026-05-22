@@ -12,6 +12,13 @@
   <b>Windows 10/11</b> · <b>Tauri 2</b> · <b>React</b> · <b>Python FastAPI</b>
 </p>
 
+## 🙏 鸣谢与灵感来源
+
+- 🎧 coco 音乐下载站 / COCO Downloader：本项目默认对接用户自建的 coco 音乐服务。项目地址：[markcxx/coco-downloader](https://github.com/markcxx/coco-downloader)
+- 🔊 XiaoMusic：本项目的小爱音箱登录、设备控制和播放链路参考并集成 XiaoMusic 能力。项目地址：[hanxi/xiaomusic](https://github.com/hanxi/xiaomusic)
+
+> ⚠️ coco 服务需要用户自行搭建并在应用内填写服务地址。本仓库不包含、不托管、不分发 coco 服务端或任何敏感音源服务代码。
+
 ## ✨ 主要能力
 
 - 🔐 小米账号登录、授权验证、设备发现和设备别名。

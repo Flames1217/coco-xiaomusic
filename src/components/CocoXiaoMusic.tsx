@@ -1758,19 +1758,19 @@ export default function CocoXiaoMusic() {
             >
               {volumePanelOpen && (
                 <>
-                  <div className="absolute bottom-8 left-1/2 z-40 h-12 w-12 -translate-x-1/2" />
-                  <div className="absolute bottom-[76px] left-1/2 z-50 -translate-x-1/2">
-                    <div className="flex h-[156px] w-12 flex-col items-center gap-2 rounded-2xl border border-border bg-popover px-3 py-3 shadow-2xl">
-                    <Slider
-                      orientation="vertical"
-                      value={[volume]}
-                      min={0}
-                      max={100}
-                      onValueChange={(value) => setLocalVolume(value[0] ?? volume)}
-                      onValueCommit={commitVolume}
-                      className="h-[104px] min-h-[104px]"
-                    />
-                    <span className="h-4 font-mono text-[10px] leading-4 text-zinc-500">{volume}%</span>
+                  <div className="absolute bottom-8 left-1/2 z-40 h-14 w-12 -translate-x-1/2" />
+                  <div className="absolute bottom-[82px] left-1/2 z-50 -translate-x-1/2">
+                    <div className="flex h-[132px] w-12 flex-col items-center gap-2 overflow-hidden rounded-2xl border border-border bg-popover px-3 py-3 shadow-2xl">
+                      <Slider
+                        orientation="vertical"
+                        value={[volume]}
+                        min={0}
+                        max={100}
+                        onValueChange={(value) => setLocalVolume(value[0] ?? volume)}
+                        onValueCommit={commitVolume}
+                        className="h-[82px] min-h-0 data-[orientation=vertical]:h-[82px] data-[orientation=vertical]:min-h-0"
+                      />
+                      <span className="h-4 font-mono text-[10px] leading-4 text-zinc-500">{volume}%</span>
                     </div>
                   </div>
                 </>
