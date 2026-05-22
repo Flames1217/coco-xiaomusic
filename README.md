@@ -9,15 +9,27 @@
 </p>
 
 <p align="center">
-  <b>Windows 10/11</b> · <b>Tauri 2</b> · <b>React</b> · <b>Python FastAPI</b>
+  <img src="https://img.shields.io/badge/Windows_10%2F11-0078D4?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows 10/11" />
+  <img src="https://img.shields.io/badge/Tauri_2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/React-149ECA?style=for-the-badge&logo=react&logoColor=white" alt="React" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
 </p>
 
-## 🙏 鸣谢与灵感来源
+## <img src="./assets/readme/sparkles.svg" width="24" height="24" alt="" /> 鸣谢与灵感来源
 
-- 🎧 coco 音乐下载站 / COCO Downloader：本项目默认对接用户自建的 coco 音乐服务。项目地址：[markcxx/coco-downloader](https://github.com/markcxx/coco-downloader)
-- 🔊 XiaoMusic：本项目的小爱音箱登录、设备控制和播放链路参考并集成 XiaoMusic 能力。项目地址：[hanxi/xiaomusic](https://github.com/hanxi/xiaomusic)
+<p>
+  <img src="./assets/readme/music.svg" width="20" height="20" alt="" />
+  <b>coco 音乐下载站 / COCO Downloader</b>：本项目默认对接用户自建的 coco 音乐服务。项目地址：
+  <a href="https://github.com/markcxx/coco-downloader">markcxx/coco-downloader</a>
+</p>
 
-> ⚠️ coco 服务需要用户自行搭建并在应用内填写服务地址。本仓库不包含、不托管、不分发 coco 服务端或任何敏感音源服务代码。
+<p>
+  <img src="./assets/readme/speaker.svg" width="20" height="20" alt="" />
+  <b>XiaoMusic</b>：本项目的小爱音箱登录、设备控制和播放链路参考并集成 XiaoMusic 能力。项目地址：
+  <a href="https://github.com/hanxi/xiaomusic">hanxi/xiaomusic</a>
+</p>
+
+> <img src="./assets/readme/alert-triangle.svg" width="18" height="18" alt="" /> coco 服务需要用户自行搭建并在应用内填写服务地址。本仓库不包含、不托管、不分发 coco 服务端或任何敏感音源服务代码。
 
 ## ✨ 主要能力
 

@@ -1,6 +1,6 @@
 [package]
 name = "coco-xiaomusic"
-version = "2.0.1"
+version = "2.0.2"
 description = "轻量的小爱音箱 coco 音乐控制台"
 authors = ["Viper373"]
 edition = "2021"
