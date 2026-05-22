@@ -1758,8 +1758,8 @@ export default function CocoXiaoMusic() {
             >
               {volumePanelOpen && (
                 <>
-                  <div className="absolute bottom-8 left-1/2 z-40 h-14 w-12 -translate-x-1/2" />
-                  <div className="absolute bottom-[82px] left-1/2 z-50 -translate-x-1/2">
+                  <div className="absolute bottom-full left-1/2 z-40 h-2 w-12 -translate-x-1/2" />
+                  <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-50 -translate-x-1/2">
                     <div className="flex h-[132px] w-12 flex-col items-center gap-2 overflow-hidden rounded-2xl border border-border bg-popover px-3 py-3 shadow-2xl">
                       <Slider
                         orientation="vertical"
