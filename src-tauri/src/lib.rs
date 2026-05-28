@@ -6,7 +6,7 @@ use std::{
     env, fs, io,
     net::Ipv4Addr,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Child, Command, Output, Stdio},
     sync::Mutex,
     time::Duration,
 };
@@ -62,6 +62,11 @@ struct TrayPlaylistPayload {
 struct CloseChoicePayload {
     behavior: String,
     remember: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct AutoStartPayload {
+    enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -331,6 +336,96 @@ fn random_token() -> String {
         .take(48)
         .map(char::from)
         .collect()
+}
+
+const AUTO_START_REG_PATH: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTO_START_REG_NAME: &str = "coco-xiaomusic";
+
+fn hidden_command_output(command: &mut Command) -> io::Result<Output> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.output()
+}
+
+fn startup_command_value() -> Result<String, String> {
+    let exe = env::current_exe().map_err(|error| format!("读取程序路径失败: {error}"))?;
+    Ok(format!("\"{}\"", exe.display()))
+}
+
+fn query_auto_start_value() -> Result<Option<String>, String> {
+    let mut command = Command::new("reg");
+    command
+        .arg("query")
+        .arg(AUTO_START_REG_PATH)
+        .arg("/v")
+        .arg(AUTO_START_REG_NAME);
+    let output = hidden_command_output(&mut command)
+        .map_err(|error| format!("读取开机自启状态失败: {error}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        if !line.contains(AUTO_START_REG_NAME) {
+            continue;
+        }
+        if let Some((_, value)) = line.split_once("REG_SZ") {
+            return Ok(Some(value.trim().to_string()));
+        }
+    }
+    Ok(None)
+}
+
+fn is_auto_start_enabled() -> Result<bool, String> {
+    let Some(value) = query_auto_start_value()? else {
+        return Ok(false);
+    };
+    let expected = startup_command_value()?.to_lowercase().replace('/', "\\");
+    Ok(value.to_lowercase().replace('/', "\\") == expected)
+}
+
+fn set_auto_start_enabled(enabled: bool) -> Result<bool, String> {
+    if enabled {
+        let mut command = Command::new("reg");
+        command
+            .arg("add")
+            .arg(AUTO_START_REG_PATH)
+            .arg("/v")
+            .arg(AUTO_START_REG_NAME)
+            .arg("/t")
+            .arg("REG_SZ")
+            .arg("/d")
+            .arg(startup_command_value()?)
+            .arg("/f");
+        let output = hidden_command_output(&mut command)
+            .map_err(|error| format!("开启开机自启失败: {error}"))?;
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("开启开机自启失败: {}", error.trim()));
+        }
+    } else {
+        let mut command = Command::new("reg");
+        command
+            .arg("delete")
+            .arg(AUTO_START_REG_PATH)
+            .arg("/v")
+            .arg(AUTO_START_REG_NAME)
+            .arg("/f");
+        let output = hidden_command_output(&mut command)
+            .map_err(|error| format!("关闭开机自启失败: {error}"))?;
+        if !output.status.success() && query_auto_start_value()?.is_some() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("关闭开机自启失败: {}", error.trim()));
+        }
+    }
+    is_auto_start_enabled()
 }
 
 fn resolve_python() -> String {
@@ -711,6 +806,18 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?)?;
+    let auto_start_enabled = is_auto_start_enabled().unwrap_or(false);
+    menu.append(&MenuItem::with_id(
+        app,
+        "tray-autostart",
+        if auto_start_enabled {
+            "开机自启：已开启"
+        } else {
+            "开机自启：已关闭"
+        },
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
         app,
@@ -907,6 +1014,15 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 fn handle_tray_menu(app: &AppHandle, id: &str) {
     match id {
         "tray-open" => show_main_window(app),
+        "tray-autostart" => {
+            let next_enabled = !is_auto_start_enabled().unwrap_or(false);
+            if let Ok(enabled) = set_auto_start_enabled(next_enabled) {
+                let _ = update_tray_menu(app);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("coco-auto-start-changed", json!({ "enabled": enabled }));
+                }
+            }
+        }
         "tray-prev" => {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move { play_tray_offset(handle, -1).await });
@@ -1015,6 +1131,18 @@ async fn wait_for_health(state: &AppState) -> Result<(), String> {
         }
     }
     Err("后台服务健康检查超时".to_string())
+}
+
+#[tauri::command]
+fn get_auto_start() -> Result<bool, String> {
+    is_auto_start_enabled()
+}
+
+#[tauri::command]
+fn set_auto_start(payload: AutoStartPayload, app: AppHandle) -> Result<bool, String> {
+    let enabled = set_auto_start_enabled(payload.enabled)?;
+    update_tray_menu(&app)?;
+    Ok(enabled)
 }
 
 #[tauri::command]
@@ -1417,6 +1545,8 @@ pub fn run() {
             test_coco_connection,
             check_for_updates,
             install_update,
+            get_auto_start,
+            set_auto_start,
             clear_events
         ])
         .run(tauri::generate_context!())

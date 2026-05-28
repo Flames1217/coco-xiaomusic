@@ -42,6 +42,7 @@ import {
 import {
   checkForUpdates,
   clearEvents,
+  getAutoStart,
   getEvents,
   getStatus,
   handleCloseChoice,
@@ -56,6 +57,7 @@ import {
   saveStrategy,
   search,
   seekPlayback,
+  setAutoStart,
   setVolume,
   syncTrayPlaylist,
   testCocoConnection,
@@ -212,6 +214,9 @@ const text = {
       voiceHits: "语音命中次数",
       uptime: "服务运行时长",
       discoveredDevices: "已发现设备",
+      appSettings: "应用设置",
+      autoStart: "开机自启",
+      autoStartHint: "Windows 登录后自动启动 coco-xiaomusic，不会在系统盘创建快捷方式。",
       serviceConfig: "服务配置",
       cocoBase: "coco 服务地址",
       streamPort: "MP3 流服务端口",
@@ -358,6 +363,9 @@ const text = {
       voiceHits: "Voice hits",
       uptime: "Service uptime",
       discoveredDevices: "Discovered devices",
+      appSettings: "App settings",
+      autoStart: "Launch on startup",
+      autoStartHint: "Start coco-xiaomusic after Windows sign-in without creating a startup shortcut on the system drive.",
       serviceConfig: "Service config",
       cocoBase: "coco service URL",
       streamPort: "MP3 stream port",
@@ -579,6 +587,8 @@ export default function CocoXiaoMusic() {
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateRead, setUpdateRead] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+  const [autoStartBusy, setAutoStartBusy] = useState(false);
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [volume, setLocalVolume] = useState(loadSavedVolume);
@@ -715,6 +725,8 @@ export default function CocoXiaoMusic() {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let unlistenClose: (() => void) | undefined;
     let unlistenTray: (() => void) | undefined;
+    let unlistenAutoStart: (() => void) | undefined;
+    getAutoStart().then(setAutoStartEnabled).catch(() => undefined);
     listen("coco-close-requested", () => {
       setClosePromptOpen(true);
     }).then((cleanup) => {
@@ -730,9 +742,15 @@ export default function CocoXiaoMusic() {
     }).then((cleanup) => {
       unlistenTray = cleanup;
     });
+    listen<{ enabled?: boolean }>("coco-auto-start-changed", (event) => {
+      setAutoStartEnabled(Boolean(event.payload?.enabled));
+    }).then((cleanup) => {
+      unlistenAutoStart = cleanup;
+    });
     return () => {
       unlistenClose?.();
       unlistenTray?.();
+      unlistenAutoStart?.();
     };
   }, []);
 
@@ -866,6 +884,19 @@ export default function CocoXiaoMusic() {
       throw error;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleAutoStart(nextEnabled: boolean) {
+    setAutoStartBusy(true);
+    try {
+      const enabled = await setAutoStart(nextEnabled);
+      setAutoStartEnabled(enabled);
+      setToast(enabled ? "已开启开机自启" : "已关闭开机自启");
+    } catch (error) {
+      setToast(String(error));
+    } finally {
+      setAutoStartBusy(false);
     }
   }
 
@@ -1544,6 +1575,16 @@ export default function CocoXiaoMusic() {
 
           {activeNav === "settings" && (
             <div className="mx-auto w-full max-w-[760px] space-y-4">
+              <Panel title={t.label.appSettings}>
+                <div className="flex items-center justify-between gap-4 rounded-[10px] border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+                  <div>
+                    <div className="text-[14px] font-semibold text-zinc-950 dark:text-zinc-50">{t.label.autoStart}</div>
+                    <p className="mt-1 text-[12px] leading-5 text-zinc-500 dark:text-zinc-400">{t.label.autoStartHint}</p>
+                  </div>
+                  <Switch checked={autoStartEnabled} disabled={autoStartBusy} onCheckedChange={toggleAutoStart} />
+                </div>
+              </Panel>
+
               <Panel title={t.label.serviceConfig}>
                 <Label title={t.label.cocoBase}>
                   <div className="flex gap-2">

@@ -31,6 +31,14 @@ export async function handleCloseChoice(behavior: "tray" | "exit", remember: boo
   return invoke("handle_close_choice", { payload: { behavior, remember } });
 }
 
+export async function getAutoStart(): Promise<boolean> {
+  return invoke<boolean>("get_auto_start");
+}
+
+export async function setAutoStart(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_auto_start", { payload: { enabled } });
+}
+
 export async function pausePlayback() {
   return invoke("pause_playback");
 }
