@@ -1024,7 +1024,10 @@ async fn get_status(state: State<'_, AppState>) -> Result<Value, String> {
 #[tauri::command]
 async fn get_events(limit: Option<u16>, state: State<'_, AppState>) -> Result<Value, String> {
     let limit = limit.unwrap_or(120);
-    state.get(&format!("/events?limit={limit}")).await
+    match state.get(&format!("/events?limit={limit}")).await {
+        Ok(value) => Ok(value),
+        Err(_) => Ok(json!({ "items": [] })),
+    }
 }
 
 #[tauri::command]

@@ -450,9 +450,9 @@ const navItems: Array<{ id: NavItem; icon: typeof Home }> = [
   { id: "account", icon: ShieldAlert }
 ];
 
-function extractFirstUrl(value: string | undefined): string {
-  const match = String(value ?? "").match(/https?:\/\/\S+/);
-  return match?.[0] ?? "";
+function extractVerificationUrl(value: string | undefined): string {
+  const matches = String(value ?? "").match(/https?:\/\/\S+/g) ?? [];
+  return matches.find((url) => url.includes("account.xiaomi.com")) ?? "";
 }
 
 function formatTime(value: number): string {
@@ -624,7 +624,7 @@ export default function CocoXiaoMusic() {
   const isPlaying = Boolean(status.last_used_url && !status.playback_paused);
   const duration = Number(status.last_duration ?? 0);
   const position = Number(status.last_position ?? 0);
-  const verificationUrl = extractFirstUrl(status.startup_error || toast);
+  const verificationUrl = extractVerificationUrl(status.startup_error || toast);
   const readyLabel = status.ready ? t.status.online : status.starting ? t.status.starting : status.startup_error ? t.status.pending : t.status.offline;
   const activeDeviceName =
     devices.find((device) => manualTargetDids.has(device.did))?.name || devices[0]?.name || t.status.noDevice;
@@ -837,7 +837,7 @@ export default function CocoXiaoMusic() {
       hydrateForms(nextStatus, forceHydrate);
       const startupError = nextStatus.startup_error || "";
       setToast(
-        extractFirstUrl(startupError)
+        extractVerificationUrl(startupError)
           ? t.message.verify
           : startupError || (nextStatus.ready ? t.message.online : t.message.waiting)
       );
