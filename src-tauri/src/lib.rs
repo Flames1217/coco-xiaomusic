@@ -951,12 +951,19 @@ fn spawn_sidecar(
     }
 
     let python = resolve_python();
+    let vendor_dir = sidecar_dir.join("vendor");
+    let python_path = if vendor_dir.exists() {
+        env::join_paths([vendor_dir.as_path(), sidecar_dir.as_path()])
+            .map_err(|error| format!("构建后台服务依赖路径失败: {error}"))?
+    } else {
+        sidecar_dir.clone().into_os_string()
+    };
     let mut command = Command::new(python);
     command
         .arg("-m")
         .arg("coco_sidecar.api")
         .current_dir(&home)
-        .env("PYTHONPATH", &sidecar_dir)
+        .env("PYTHONPATH", python_path)
         .env("COCO_XIAOMUSIC_HOME", &home)
         .env("COCO_XIAOMUSIC_CONTROL_HOST", "127.0.0.1")
         .env("COCO_XIAOMUSIC_CONTROL_PORT", port.to_string())
