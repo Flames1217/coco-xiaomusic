@@ -85,6 +85,43 @@ def repair_text(value: Any) -> Any:
     return repaired if repaired != value else value
 
 
+def salvage_settings_text(text: str) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for key in (
+        "account",
+        "password",
+        "hostname",
+        "admin_host",
+        "coco_base",
+        "takeover_mode",
+        "edge_tts_voice",
+    ):
+        match = re.search(rf'"{key}"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+        if match:
+            try:
+                data[key] = json.loads(f'"{match.group(1)}"')
+            except JSONDecodeError:
+                data[key] = match.group(1)
+
+    for key in ("xiaomusic_port", "admin_port", "last_volume"):
+        match = re.search(rf'"{key}"\s*:\s*(\d+)', text)
+        if match:
+            data[key] = int(match.group(1))
+
+    match = re.search(r'"official_answer_delay_sec"\s*:\s*([0-9.]+)', text)
+    if match:
+        data["official_answer_delay_sec"] = float(match.group(1))
+
+    for key in ("selected_dids", "manual_target_dids", "coco_keywords"):
+        match = re.search(rf'"{key}"\s*:\s*(\[[\s\S]*?\])', text)
+        if match:
+            try:
+                data[key] = json.loads(match.group(1))
+            except JSONDecodeError:
+                pass
+    return data
+
+
 @dataclass
 class AppSettings:
     account: str = ""
@@ -111,9 +148,15 @@ class AppSettings:
         if not SETTINGS_PATH.exists():
             return cls()
         try:
-            data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        except (OSError, JSONDecodeError):
+            raw_settings = SETTINGS_PATH.read_text(encoding="utf-8")
+        except OSError:
             return cls()
+        try:
+            data = json.loads(raw_settings)
+        except JSONDecodeError:
+            data = salvage_settings_text(raw_settings)
+            if not data:
+                return cls()
         repaired = False
         for field_name in REPAIRABLE_TEXT_FIELDS:
             current = data.get(field_name)

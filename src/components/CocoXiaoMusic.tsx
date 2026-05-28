@@ -758,7 +758,14 @@ export default function CocoXiaoMusic() {
 
   function hydrateForms(next: AppStatus, force = false) {
     const settings = next.settings ?? {};
+    const hasSettings =
+      Boolean(settings.account) ||
+      Boolean(settings.password) ||
+      Boolean(settings.hostname) ||
+      Boolean(settings.coco_base) ||
+      Boolean(settings.coco_keywords?.length);
     if (!force && formsHydrated.current) return;
+    if (!force && !hasSettings) return;
     setAccount(settings.account ?? "");
     setPasswordValue(settings.password ?? "");
     setHostname(settings.hostname ?? "");
@@ -774,7 +781,7 @@ export default function CocoXiaoMusic() {
     setManualTargetDids(new Set(next.manual_target_dids ?? []));
     setAliases(Object.fromEntries((next.devices ?? []).map((device) => [device.did, device.alias ?? ""])));
     if (typeof next.last_volume === "number") setLocalVolume(Math.round(next.last_volume));
-    formsHydrated.current = true;
+    formsHydrated.current = hasSettings;
   }
 
   function showDialog(title: string, message: string, tone: "success" | "error" = "success") {

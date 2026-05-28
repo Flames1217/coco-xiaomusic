@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     env, fs, io,
+    net::Ipv4Addr,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::Mutex,
@@ -435,6 +436,132 @@ fn prepare_home() -> Result<PathBuf, String> {
             .map_err(|error| format!("create runtime dir failed: {error}"))?;
     }
     Ok(home)
+}
+
+fn detect_lan_hostname() -> String {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("ipconfig");
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+
+        if let Ok(output) = command.output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for part in text.split(|ch: char| !(ch.is_ascii_digit() || ch == '.')) {
+                if let Ok(address) = part.parse::<Ipv4Addr>() {
+                    if !address.is_loopback() && !address.is_link_local() && is_private_ipv4(address) {
+                        return format!("http://{address}");
+                    }
+                }
+            }
+        }
+    }
+    "http://127.0.0.1".to_string()
+}
+
+fn is_private_ipv4(address: Ipv4Addr) -> bool {
+    let octets = address.octets();
+    octets[0] == 10
+        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+        || (octets[0] == 192 && octets[1] == 168)
+}
+
+fn extract_json_string(text: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\"");
+    let start = text.find(&pattern)?;
+    let after_key = &text[start + pattern.len()..];
+    let colon = after_key.find(':')?;
+    let mut value = after_key[colon + 1..].trim_start().chars();
+    if value.next()? != '"' {
+        return None;
+    }
+    let mut output = String::new();
+    let mut escaped = false;
+    for ch in value {
+        if escaped {
+            output.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            return Some(output);
+        }
+        output.push(ch);
+    }
+    None
+}
+
+fn extract_json_number(text: &str, key: &str) -> Option<i64> {
+    let pattern = format!("\"{key}\"");
+    let start = text.find(&pattern)?;
+    let after_key = &text[start + pattern.len()..];
+    let colon = after_key.find(':')?;
+    let number = after_key[colon + 1..]
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    number.parse().ok()
+}
+
+fn salvage_settings_text(text: &str) -> Value {
+    let mut settings = json!({});
+    for key in ["account", "password", "hostname", "admin_host", "coco_base", "takeover_mode"] {
+        if let Some(value) = extract_json_string(text, key) {
+            settings[key] = json!(value);
+        }
+    }
+    for key in ["xiaomusic_port", "admin_port", "last_volume"] {
+        if let Some(value) = extract_json_number(text, key) {
+            settings[key] = json!(value);
+        }
+    }
+    settings
+}
+
+fn fallback_status(home: &PathBuf, error: String) -> Value {
+    let settings_path = home.join("data").join("app_settings.json");
+    let mut settings = fs::read_to_string(&settings_path)
+        .ok()
+        .map(|content| {
+            serde_json::from_str::<Value>(&content)
+                .unwrap_or_else(|_| salvage_settings_text(&content))
+        })
+        .unwrap_or_else(|| json!({}));
+
+    if !settings.is_object() {
+        settings = json!({});
+    }
+    if settings.get("hostname").and_then(Value::as_str).unwrap_or("").is_empty() {
+        settings["hostname"] = json!(detect_lan_hostname());
+    }
+    if settings.get("coco_base").and_then(Value::as_str).unwrap_or("").is_empty() {
+        settings["coco_base"] = json!("https://coco.viper3.top");
+    }
+    if settings.get("admin_port").and_then(Value::as_i64).is_none() {
+        settings["admin_port"] = json!(8088);
+    }
+
+    json!({
+        "ready": false,
+        "starting": true,
+        "sidecar_ready": false,
+        "startup_error": error,
+        "settings": settings,
+        "selected_dids": settings.get("selected_dids").cloned().unwrap_or_else(|| json!([])),
+        "manual_target_dids": settings.get("manual_target_dids").cloned().unwrap_or_else(|| json!([])),
+        "coco_base": settings.get("coco_base").cloned().unwrap_or_else(|| json!("https://coco.viper3.top")),
+        "last_volume": settings.get("last_volume").cloned().unwrap_or_else(|| json!(50)),
+        "devices": []
+    })
 }
 
 fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
@@ -885,7 +1012,13 @@ async fn wait_for_health(state: &AppState) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_status(state: State<'_, AppState>) -> Result<Value, String> {
-    state.get("/status").await
+    match state.get("/status").await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let home = state.runtime_home()?;
+            Ok(fallback_status(&home, error))
+        }
+    }
 }
 
 #[tauri::command]
