@@ -55,6 +55,8 @@ class RuntimeState:
     playback_paused: bool = False
     startup_error: str = ""
     discovered_devices: list[dict] = field(default_factory=list)
+    last_search_keyword: str = ""
+    last_search_results: list[dict] = field(default_factory=list)
     events: deque[PlaybackEvent] = field(default_factory=lambda: deque(maxlen=120))
 
 
@@ -422,6 +424,38 @@ class CocoXiaoMusicService:
             self._log("info", f"相关度召回：{len(results)} 条候选，使用 {len(queries)} 个搜索词", keyword=keyword)
         return results
 
+    def _remember_search_results(
+        self,
+        keyword: str,
+        ranked: list[tuple[float, CocoSong, str]],
+        selected_song: CocoSong | None = None,
+    ):
+        selected_key = (selected_song.provider, selected_song.id) if selected_song else None
+        items = []
+        for index, (_, song, _) in enumerate(ranked[:80]):
+            duration = self._song_duration_seconds(song.raw or {})
+            items.append(
+                {
+                    "item": song.raw
+                    or {
+                        "id": song.id,
+                        "provider": song.provider,
+                        "title": song.title,
+                        "artist": song.artist,
+                        "album": song.album,
+                        "cover": song.cover,
+                        "duration": song.duration,
+                        "audio_type": song.audio_type,
+                        "bitrate": song.bitrate,
+                    },
+                    "is_first": (song.provider, song.id) == selected_key if selected_key else index == 0,
+                    "has_url": None,
+                    "preview_reason": self._voice_skip_reason(song, duration),
+                }
+            )
+        self.state.last_search_keyword = keyword
+        self.state.last_search_results = items
+
     def _build_xiaomusic(self) -> XiaoMusic:
         self._patch_xiaomusic_logger()
         user_keywords = {keyword: "online_play" for keyword in self.settings.coco_keywords}
@@ -694,10 +728,13 @@ class CocoXiaoMusicService:
 
         if not ranked:
             self.state.last_error = "not found"
+            self.state.last_search_keyword = keyword
+            self.state.last_search_results = []
             self._log("error", f"coco 没搜到：{keyword}", keyword=keyword)
             await self._speak_if_needed(device, self.settings.error_tts, keyword=keyword, artist="", title="")
             return {"success": False, "error": "not found"}
 
+        self._remember_search_results(keyword, ranked)
         last_error = ""
         for index, (score, song, matched_query) in enumerate(ranked[:80]):
             try:
@@ -726,6 +763,7 @@ class CocoXiaoMusicService:
                 self._log("warn", f"前 {index} 条候选不可用，已切到可推送结果：{song.title} - {song.artist} [{song.provider}]", keyword=keyword, song=song.raw)
             if matched_query != keyword:
                 self._log("info", f"相关度命中：{song.title} - {song.artist} [{song.provider}]，搜索词={matched_query}，得分={score:.2f}", keyword=keyword, song=song.raw)
+            self._remember_search_results(keyword, ranked, selected_song=song)
             await self._speak_if_needed(device, self.settings.found_tts, keyword=keyword, artist=song.artist, title=song.title)
             result = await self._play_song(did, keyword, song, url, local_url=local_url)
             if result.get("success"):
@@ -1735,6 +1773,8 @@ class CocoXiaoMusicService:
             "service_started_at": self.state.service_started_at,
             "last_keyword": self.state.last_keyword,
             "last_song": self.state.last_song,
+            "last_search_keyword": self.state.last_search_keyword,
+            "last_search_results": self.state.last_search_results,
             "last_error": self.state.last_error,
             "last_playback_at": self.state.last_playback_at,
             "last_duration": self.state.last_duration,

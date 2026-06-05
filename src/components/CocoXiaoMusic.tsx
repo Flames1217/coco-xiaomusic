@@ -612,6 +612,8 @@ export default function CocoXiaoMusic() {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const updateCheckedRef = useRef(false);
   const previousVolumeRef = useRef(loadSavedVolume() > 0 ? loadSavedVolume() : 50);
+  const syncedVoiceSearchRef = useRef("");
+  const syncedPlayingSongRef = useRef("");
 
   const isDark = theme === "dark";
   const closeCopy = language === "zh"
@@ -853,6 +855,7 @@ export default function CocoXiaoMusic() {
       setStatus(nextStatus);
       setEvents(nextEvents);
       hydrateForms(nextStatus, forceHydrate);
+      syncVoicePlayback(nextStatus);
       const startupError = nextStatus.startup_error || "";
       setToast(
         extractVerificationUrl(startupError)
@@ -884,6 +887,41 @@ export default function CocoXiaoMusic() {
       throw error;
     } finally {
       setBusy(false);
+    }
+  }
+
+  function syncVoicePlayback(nextStatus: AppStatus) {
+    const remoteResults = nextStatus.last_search_results ?? [];
+    const remoteKeyword = nextStatus.last_search_keyword || nextStatus.last_keyword || "";
+    if (remoteKeyword && remoteResults.length > 0) {
+      const selectedKey = songKey(remoteResults.find((item) => item.is_first)?.item ?? remoteResults[0]?.item);
+      const syncKey = `${remoteKeyword}:${remoteResults.length}:${selectedKey}`;
+      if (syncKey !== syncedVoiceSearchRef.current) {
+        syncedVoiceSearchRef.current = syncKey;
+        setQuery(remoteKeyword);
+        setResults(remoteResults);
+        setProviderFilter("all");
+        setSelectedIndex(Math.max(0, remoteResults.findIndex((item) => item.is_first)));
+        setSearchFeedback({
+          tone: "success",
+          message: formatMessage(t.searchState.done, { count: remoteResults.length })
+        });
+      }
+    }
+
+    const song = nextStatus.last_song;
+    const playingKey = songKey(song);
+    if (song?.title && playingKey && playingKey !== syncedPlayingSongRef.current) {
+      syncedPlayingSongRef.current = playingKey;
+      setPlaylist((current) => {
+        const existingIndex = current.findIndex((item) => songKey(item) === playingKey);
+        if (existingIndex >= 0) {
+          setPlaylistIndex(existingIndex);
+          return current;
+        }
+        setPlaylistIndex(current.length);
+        return [...current, song];
+      });
     }
   }
 

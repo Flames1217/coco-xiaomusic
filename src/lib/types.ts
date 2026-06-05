@@ -63,6 +63,8 @@ export interface AppStatus {
   service_started_at?: string;
   last_keyword?: string;
   last_song?: Song | null;
+  last_search_keyword?: string;
+  last_search_results?: SearchItem[];
   last_error?: string;
   last_duration?: number;
   last_position?: number;
