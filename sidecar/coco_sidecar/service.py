@@ -712,12 +712,12 @@ class CocoXiaoMusicService:
                 continue
             local_url = self._stream_url_for_speaker(url, song)
             duration = await asyncio.get_running_loop().run_in_executor(None, self._resolve_song_duration, song, url, 8)
-            preview_reason = self._preview_skip_reason(song, duration)
-            if preview_reason:
-                last_error = preview_reason
+            skip_reason = self._voice_skip_reason(song, duration)
+            if skip_reason:
+                last_error = skip_reason
                 self._log(
                     "warn",
-                    f"跳过疑似试听片段：{song.title} - {song.artist} [{song.provider}]，{preview_reason}",
+                    f"语音播放跳过无效时长候选：{song.title} - {song.artist} [{song.provider}]，{skip_reason}",
                     keyword=keyword,
                     song=song.raw,
                 )
@@ -907,6 +907,13 @@ class CocoXiaoMusicService:
         if self._is_preview_duration(expected, actual_seconds):
             return f"真实音频约 {actual_seconds:.0f}s，明显短于标注 {expected:.0f}s"
         return ""
+
+    def _voice_skip_reason(self, song: CocoSong, actual_seconds: float) -> str:
+        if actual_seconds <= 0:
+            return "未拿到有效时长"
+        if actual_seconds <= self.PREVIEW_MAX_SECONDS:
+            return f"时长异常短，仅 {actual_seconds:.0f}s"
+        return self._preview_skip_reason(song, actual_seconds)
 
     def _current_position_seconds(self) -> float:
         if self.state.playback_paused:
@@ -1138,7 +1145,7 @@ class CocoXiaoMusicService:
             (
                 index
                 for index, song in enumerate(songs)
-                if not self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+                if not self._voice_skip_reason(song, self._song_duration_seconds(song.raw or {}))
             ),
             0,
         )
@@ -1148,7 +1155,7 @@ class CocoXiaoMusicService:
             if index < enrich_count:
                 result = enrich_results[index]
                 has_url = isinstance(result, dict) and bool(result.get("url"))
-            preview_reason = self._preview_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+            preview_reason = self._voice_skip_reason(song, self._song_duration_seconds(song.raw or {}))
             preview.append(
                 {
                     "item": song.raw,
