@@ -158,10 +158,24 @@ class CocoXiaoMusicService:
                 console.print(f"[{style}]{prefix}[/{style}] {repair_text(message)}")
 
     @staticmethod
+    def _is_mina_auth_error(exc: Exception) -> bool:
+        text = repr(exc)
+        return (
+            "api2.mina.mi.com/remote/ubus" in text
+            and (
+                "HTTP Status 401" in text
+                or "Unauthorized" in text
+                or "status 401" in text.lower()
+            )
+        )
+
+    @staticmethod
     def _is_noisy_mina_error(exc: Exception) -> bool:
         text = repr(exc)
         if "api2.mina.mi.com/remote/ubus" not in text:
             return False
+        if CocoXiaoMusicService._is_mina_auth_error(exc):
+            return True
         return any(
             marker in text
             for marker in (
@@ -178,6 +192,17 @@ class CocoXiaoMusicService:
 
     def _record_quiet_mina_error(self, did: str, exc: Exception):
         self._mina_quiet_error_count[did] = self._mina_quiet_error_count.get(did, 0) + 1
+        if not self._is_mina_auth_error(exc):
+            return
+        self.state.startup_error = "小米账号授权已失效，请到账号授权页重新保存账号，必要时完成安全验证"
+        now = time.monotonic()
+        last = self._last_mina_error_log_at.get(did, 0)
+        if now - last > 60:
+            self._last_mina_error_log_at[did] = now
+            self._log(
+                "warn",
+                f"Mina 认证已失效 did={did}：接口返回 401，请重新保存账号或完成小米安全验证",
+            )
 
     def _is_quiet_mina_error(self, did: str, exc: Exception) -> bool:
         if self._is_noisy_mina_error(exc):
@@ -660,6 +685,8 @@ class CocoXiaoMusicService:
                     except Exception as exc:
                         if self._is_noisy_mina_error(exc):
                             self._record_quiet_mina_error(did, exc)
+                            if self._is_mina_auth_error(exc):
+                                await asyncio.sleep(5)
                             continue
                         self._log("warn", f"Mina 拉取失败 did={did}：{exc!r}")
                         continue
