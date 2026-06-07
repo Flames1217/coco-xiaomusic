@@ -1166,10 +1166,55 @@ async fn get_events(limit: Option<u16>, state: State<'_, AppState>) -> Result<Va
 }
 
 #[tauri::command]
-async fn search(payload: KeywordPayload, state: State<'_, AppState>) -> Result<Value, String> {
-    state
-        .post("/search", json!({ "keyword": payload.keyword, "providers": payload.providers }))
+async fn search(
+    payload: KeywordPayload,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let body = json!({ "keyword": payload.keyword, "providers": payload.providers });
+    let (base_url, token) = state.snapshot()?;
+    let mut response = state
+        .client
+        .post(format!("{base_url}/search/stream"))
+        .headers(auth_headers(&token)?)
+        .json(&body)
+        .send()
         .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.map_err(|error| error.to_string())?;
+        return Err(format!("后台服务 HTTP {status}: {body}"));
+    }
+
+    let mut buffer = String::new();
+    let mut final_items = json!([]);
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(pos) = buffer.find('\n') {
+            let line = buffer[..pos].trim().to_string();
+            buffer = buffer[pos + 1..].to_string();
+            if line.is_empty() {
+                continue;
+            }
+            let event: Value = serde_json::from_str(&line)
+                .map_err(|error| format!("搜索流返回了无效 JSON: {error}; body={line}"))?;
+            if event.get("type").and_then(Value::as_str) == Some("done") {
+                final_items = event.get("items").cloned().unwrap_or_else(|| json!([]));
+            }
+            let _ = app.emit("coco-search-stream", event);
+        }
+    }
+    let line = buffer.trim();
+    if !line.is_empty() {
+        let event: Value = serde_json::from_str(line)
+            .map_err(|error| format!("搜索流返回了无效 JSON: {error}; body={line}"))?;
+        if event.get("type").and_then(Value::as_str) == Some("done") {
+            final_items = event.get("items").cloned().unwrap_or_else(|| json!([]));
+        }
+        let _ = app.emit("coco-search-stream", event);
+    }
+    Ok(json!({ "items": final_items }))
 }
 
 #[tauri::command]

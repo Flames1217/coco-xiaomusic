@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .runtime import prepare_runtime
@@ -140,6 +142,18 @@ async def search(request: KeywordRequest):
     if not keyword:
         return {"items": []}
     return await service.search_preview(keyword, request.providers)
+
+
+@app.post("/search/stream", dependencies=[Depends(require_token)])
+async def search_stream(request: KeywordRequest):
+    keyword = request.keyword.strip()
+    if not keyword:
+        line = json.dumps({"type": "done", "keyword": "", "items": []}, ensure_ascii=False) + "\n"
+        return StreamingResponse(iter([line]), media_type="application/x-ndjson")
+    return StreamingResponse(
+        service.search_preview_stream(keyword, request.providers),
+        media_type="application/x-ndjson",
+    )
 
 
 @app.post("/play/keyword", dependencies=[Depends(require_token)])

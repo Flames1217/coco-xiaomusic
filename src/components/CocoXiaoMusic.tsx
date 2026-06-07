@@ -95,6 +95,14 @@ type Language = "zh" | "en";
 type TakeoverMode = "keyword" | "all" | "off";
 type ActionResult = { success?: boolean; error?: string; [key: string]: unknown };
 type SearchFeedback = { tone: "info" | "success" | "warn" | "error"; message: string };
+type SearchStreamEvent = {
+  type?: "reset" | "item" | "done" | "error";
+  keyword?: string;
+  items?: SearchItem[];
+  item?: SearchItem;
+  index?: number;
+  error?: string;
+};
 
 const playlistStorageKey = "coco-playlist";
 const volumeStorageKey = "coco-last-volume";
@@ -501,7 +509,7 @@ function formatUptime(startedAt: string | undefined): string {
 function durationText(value: unknown): string {
   if (typeof value === "number") return formatTime(value > 10000 ? value / 1000 : value);
   const text = String(value ?? "").trim();
-  return text || "--:--";
+  return text || "获取中";
 }
 
 function levelLabel(level: string): string {
@@ -614,6 +622,7 @@ export default function CocoXiaoMusic() {
   const previousVolumeRef = useRef(loadSavedVolume() > 0 ? loadSavedVolume() : 50);
   const syncedVoiceSearchRef = useRef("");
   const syncedPlayingSongRef = useRef("");
+  const activeSearchKeywordRef = useRef("");
 
   const isDark = theme === "dark";
   const closeCopy = language === "zh"
@@ -728,6 +737,7 @@ export default function CocoXiaoMusic() {
     let unlistenClose: (() => void) | undefined;
     let unlistenTray: (() => void) | undefined;
     let unlistenAutoStart: (() => void) | undefined;
+    let unlistenSearchStream: (() => void) | undefined;
     getAutoStart().then(setAutoStartEnabled).catch(() => undefined);
     listen("coco-close-requested", () => {
       setClosePromptOpen(true);
@@ -749,10 +759,30 @@ export default function CocoXiaoMusic() {
     }).then((cleanup) => {
       unlistenAutoStart = cleanup;
     });
+    listen<SearchStreamEvent>("coco-search-stream", (event) => {
+      const payload = event.payload;
+      if (!payload?.type || payload.keyword !== activeSearchKeywordRef.current) return;
+      if (payload.type === "reset" || payload.type === "done") {
+        setResults(payload.items ?? []);
+        setProviderFilter("all");
+        setSelectedIndex(0);
+      } else if (payload.type === "item" && payload.item && typeof payload.index === "number") {
+        setResults((current) => {
+          const next = [...current];
+          next[payload.index!] = payload.item!;
+          return next.filter(Boolean);
+        });
+      } else if (payload.type === "error" && payload.error) {
+        setSearchFeedback({ tone: "error", message: payload.error });
+      }
+    }).then((cleanup) => {
+      unlistenSearchStream = cleanup;
+    });
     return () => {
       unlistenClose?.();
       unlistenTray?.();
       unlistenAutoStart?.();
+      unlistenSearchStream?.();
     };
   }, []);
 
@@ -947,6 +977,10 @@ export default function CocoXiaoMusic() {
   async function doSearch() {
     const keyword = query.trim();
     if (!keyword) return;
+    activeSearchKeywordRef.current = keyword;
+    setResults([]);
+    setProviderFilter("all");
+    setSelectedIndex(0);
     setSearching(true);
     setBusy(true);
     setSearchFeedback({

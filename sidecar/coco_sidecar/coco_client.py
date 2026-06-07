@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import re
 import time
+from typing import Any
 
 import requests
 
@@ -52,15 +53,7 @@ class CocoClient:
         source_items = items if limit is None else items[:limit]
         for item in source_items:
             cover = str(item.get("cover") or item.get("extra", {}).get("cover") or "")
-            duration = (
-                item.get("duration")
-                or item.get("interval")
-                or item.get("time")
-                or item.get("songTimeMinutes")
-                or item.get("song_time")
-                or item.get("extra", {}).get("duration")
-                or ""
-            )
+            duration = self._pick_duration(item, item.get("extra"), item.get("data"), item.get("meta"))
             songs.append(
                 CocoSong(
                     id=str(item.get("id", "")),
@@ -87,8 +80,8 @@ class CocoClient:
             song.raw["cover"] = cover
             song.cover = str(cover)
         audio_type = play_info.get("type") or play_info.get("format")
-        bitrate = play_info.get("bitrate") or play_info.get("quality")
-        duration = play_info.get("duration") or play_info.get("interval") or play_info.get("time")
+        bitrate = play_info.get("bitrate") or play_info.get("quality") or play_info.get("br") or play_info.get("kbps")
+        duration = self._pick_duration(play_info, play_info.get("extra"), play_info.get("data"), play_info.get("meta"), song.raw)
         if not duration and play_info.get("url") and bitrate:
             duration = self._estimate_duration(play_info["url"], str(bitrate))
         if song.raw is not None:
@@ -103,6 +96,61 @@ class CocoClient:
         if duration and not song.duration:
             song.duration = duration
         return play_info
+
+    @classmethod
+    def _pick_duration(cls, *sources: Any) -> str | int | float:
+        keys = (
+            "duration",
+            "interval",
+            "time",
+            "songTimeMinutes",
+            "song_time",
+            "duration_ms",
+            "durationMs",
+            "duration_seconds",
+            "durationSeconds",
+            "length",
+            "playTime",
+            "play_time",
+            "dt",
+            "songDuration",
+            "song_duration",
+            "intervalSeconds",
+            "interval_seconds",
+        )
+
+        def normalize(value: Any) -> str | int | float:
+            if value is None or value == "":
+                return ""
+            if isinstance(value, (int, float)):
+                return value
+            text = str(value).strip()
+            if not text:
+                return ""
+            match = re.match(r"^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$", text)
+            if match:
+                return text
+            match = re.search(r"(\d+(?:\.\d+)?)", text)
+            return match.group(1) if match else text
+
+        def scan(source: Any) -> str | int | float:
+            if not isinstance(source, dict):
+                return ""
+            for key in keys:
+                found = normalize(source.get(key))
+                if found != "":
+                    return found
+            for nested_key in ("extra", "data", "meta", "info", "song", "music"):
+                found = scan(source.get(nested_key))
+                if found != "":
+                    return found
+            return ""
+
+        for source in sources:
+            found = scan(source)
+            if found != "":
+                return found
+        return ""
 
     @staticmethod
     def _bitrate_to_bps(value: str) -> int:

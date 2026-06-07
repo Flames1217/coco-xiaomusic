@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import shutil
@@ -65,6 +66,7 @@ class CocoXiaoMusicService:
     PREVIEW_MIN_EXPECTED_SECONDS = 90.0
     PREVIEW_RATIO = 0.68
     PREVIEW_MARKERS = ("试听", "片段", "preview", "demo", "sample")
+    TAKEOVER_MIN_VOLUME = 35
 
     def __init__(self, settings: AppSettings):
         self.settings = settings
@@ -743,6 +745,7 @@ class CocoXiaoMusicService:
             await self._speak_error_for_did(did, "没有找到可播放的目标音箱", keyword=keyword)
             return {"success": False, "error": "device not found"}
 
+        await self._ensure_takeover_volume(did)
         await self._speak_if_needed(device, self.settings.search_tts, keyword=keyword, artist="", title="")
 
         try:
@@ -880,6 +883,16 @@ class CocoXiaoMusicService:
             or raw.get("time")
             or raw.get("songTimeMinutes")
             or raw.get("song_time")
+            or raw.get("duration_ms")
+            or raw.get("durationMs")
+            or raw.get("duration_seconds")
+            or raw.get("durationSeconds")
+            or raw.get("length")
+            or raw.get("playTime")
+            or raw.get("play_time")
+            or raw.get("dt")
+            or raw.get("songDuration")
+            or raw.get("song_duration")
             or raw.get("extra", {}).get("duration")
             or 0
         )
@@ -1117,6 +1130,17 @@ class CocoXiaoMusicService:
         await device.group_force_stop_xiaoai()
         return device
 
+    async def _ensure_takeover_volume(self, did: str):
+        current = max(0, min(100, int(self.settings.last_volume or self.state.last_volume or 0)))
+        target = max(self.TAKEOVER_MIN_VOLUME, current)
+        if target <= current and self.state.last_volume >= self.TAKEOVER_MIN_VOLUME:
+            return
+        try:
+            await self.set_volume(target, [did])
+            self._log("info", f"接管后自动补偿音量到 {target}%", song=None)
+        except Exception as exc:
+            self._log("warn", f"接管后设置音量失败 did={did}: {exc!r}")
+
     async def _silence_official_channel(self, did: str):
         if not self.xiaomusic:
             return
@@ -1190,6 +1214,93 @@ class CocoXiaoMusicService:
                 return
             except OSError:
                 await asyncio.sleep(2)
+
+    def _preview_item(
+        self,
+        song: CocoSong,
+        index: int,
+        selected_key: tuple[str, str] | None = None,
+        has_url: bool | None = None,
+    ) -> dict:
+        raw = song.raw or {
+            "id": song.id,
+            "provider": song.provider,
+            "title": song.title,
+            "artist": song.artist,
+            "album": song.album,
+            "cover": song.cover,
+            "duration": song.duration,
+            "audio_type": song.audio_type,
+            "bitrate": song.bitrate,
+        }
+        duration = self._song_duration_seconds(raw)
+        return {
+            "item": raw,
+            "is_first": (song.provider, song.id) == selected_key if selected_key else index == 0,
+            "has_url": has_url,
+            "preview_reason": self._voice_skip_reason(song, duration),
+        }
+
+    def _search_stream_event(self, payload: dict) -> str:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+    async def search_preview_stream(self, keyword: str, providers: list[str] | None = None):
+        loop = asyncio.get_running_loop()
+        try:
+            songs = await loop.run_in_executor(None, self.coco.search_items, keyword, None)
+        except Exception as exc:
+            yield self._search_stream_event({"type": "error", "keyword": keyword, "error": repr(exc)})
+            yield self._search_stream_event({"type": "done", "keyword": keyword, "items": []})
+            return
+
+        allowed_providers = self._expand_provider_filters(providers)
+        if allowed_providers:
+            songs = [song for song in songs if (song.provider or "").lower() in allowed_providers]
+
+        songs = songs[:120]
+        enrich_count = min(len(songs), 80)
+        items = [self._preview_item(song, index) for index, song in enumerate(songs)]
+        yield self._search_stream_event({"type": "reset", "keyword": keyword, "items": items})
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def enrich(index: int, song: CocoSong):
+            async with semaphore:
+                try:
+                    info = await loop.run_in_executor(None, self.coco.resolve_info, song)
+                    if (
+                        index < 12
+                        and isinstance(info, dict)
+                        and info.get("url")
+                        and not self._song_duration_seconds(song.raw or {})
+                    ):
+                        await loop.run_in_executor(None, self._resolve_song_duration, song, info["url"], 3)
+                    return index, self._preview_item(song, index, has_url=isinstance(info, dict) and bool(info.get("url"))), None
+                except Exception as exc:
+                    return index, self._preview_item(song, index, has_url=False), repr(exc)
+
+        tasks = [asyncio.create_task(enrich(index, song)) for index, song in enumerate(songs[:enrich_count])]
+        for completed in asyncio.as_completed(tasks):
+            index, item, error = await completed
+            items[index] = item
+            event = {"type": "item", "keyword": keyword, "index": index, "item": item}
+            if error:
+                event["error"] = error
+            yield self._search_stream_event(event)
+
+        voice_default_index = next(
+            (
+                index
+                for index, song in enumerate(songs)
+                if not self._voice_skip_reason(song, self._song_duration_seconds(song.raw or {}))
+            ),
+            0,
+        )
+        final_items = [
+            self._preview_item(song, index, selected_key=(songs[voice_default_index].provider, songs[voice_default_index].id) if songs else None)
+            for index, song in enumerate(songs)
+        ]
+        yield self._search_stream_event({"type": "done", "keyword": keyword, "items": final_items})
 
     async def search_preview(self, keyword: str, providers: list[str] | None = None):
         songs = await asyncio.get_running_loop().run_in_executor(None, self.coco.search_items, keyword, None)

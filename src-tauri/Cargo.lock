@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "coco-xiaomusic"
-version = "2.0.11"
+version = "2.1.0"
 dependencies = [
  "portpicker",
  "rand",
